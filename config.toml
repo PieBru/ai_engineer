@@ -15,11 +15,23 @@ model = "deepseek-reasoner"
 # The LITELLM_API_BASE environment variable (e.g., from .env or shell) takes precedence over this setting.
 api_base = "https://api.deepseek.com/v1"
 
+# Maximum number of tokens for the LLM response.
+# The LITELLM_MAX_TOKENS environment variable takes precedence over this setting.
+max_tokens = 8192
+
+# Controls the AI's reasoning depth by modifying the prompt sent to the LLM.
+# Possible values: "low", "medium", "high"
+#   "low": Instructs the LLM to be concise in its reasoning.
+#   "medium": (Default) Relies on the general system prompt for reasoning detail.
+#   "high": Instructs the LLM to be very detailed and thorough in its reasoning.
+# The REASONING_EFFORT environment variable takes precedence over this setting.
+reasoning_effort = "medium"
+
 [ui]
 # Controls the verbosity of the AI's reasoning process output.
 # Possible values:
 #   "full"    - (Default) Shows the complete reasoning text.
 #   "compact" - Shows "💭 Reasoning..." once, then prints dots for progress.
 #   "silent"  - Suppresses reasoning output entirely.
-# The REASONING_STYLE environment variable takes precedence over this setting.
+# The REASONING_STYLE environment variable (e.g., from .env or shell) takes precedence over this setting.
 reasoning_style = "full"

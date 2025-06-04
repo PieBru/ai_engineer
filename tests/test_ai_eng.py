@@ -8,9 +8,6 @@ import json
 import sys # Import the sys module
 from pathlib import Path
 from unittest.mock import patch, MagicMock, call, ANY
-import time
-import httpx # For mocking httpx calls
-import copy # For deepcopy
 
 # Add the project root to sys.path to allow importing deepseek_eng
 # Assuming file is now ai_eng.py
@@ -690,7 +687,7 @@ class TestMainLoop:
     def test_main_loop_exit_quit(self, mock_handle_add, mock_stream_response, monkeypatch):
         # Test 'exit'
         de.prompt_session.prompt = MagicMock(return_value="exit")
-        with pytest.raises(SystemExit) as e: # main() calls sys.exit() internally via Rich/Python for EOF
+        with pytest.raises(SystemExit):
              de.main() # Should break loop and exit
         mock_stream_response.assert_not_called()
         de.console.print.assert_any_call("[bold bright_blue]👋 Goodbye! Happy coding![/bold bright_blue]")

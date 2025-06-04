@@ -12,13 +12,12 @@ import sys
 import json
 from pathlib import Path
 from textwrap import dedent # Used for system_PROMPT
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from pydantic import BaseModel, ConfigDict
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
-from rich.style import Style
 from prompt_toolkit import PromptSession
 from prompt_toolkit.styles import Style as PromptStyle
 import time
@@ -49,14 +48,14 @@ SUPPORTED_SET_PARAMS = {
         "toml_section": "litellm",
         "toml_key": "model",
         "default_value_key": "default_model", # Key for default in stream_llm_response
-        "description": "The language model to use (e.g., 'deepseek-reasoner', 'gpt-4o')."
+        "description": "The language model to use (e.g., 'gpt-4o', 'deepseek-reasoner')."
     },
     "api_base": {
         "env_var": "LITELLM_API_BASE",
         "toml_section": "litellm",
         "toml_key": "api_base",
         "default_value_key": "default_api_base",
-        "description": "The API base URL for the model provider."
+        "description": "The API base URL for the LLM provider."
     },
     "reasoning_style": {
         "env_var": "REASONING_STYLE",
@@ -64,10 +63,32 @@ SUPPORTED_SET_PARAMS = {
         "toml_key": "reasoning_style",
         "default_value_key": "default_reasoning_style",
         "allowed_values": ["full", "compact", "silent"],
-        "description": "Verbosity of AI reasoning: 'full', 'compact', or 'silent'."
+        "description": "Controls the display of AI's reasoning process: 'full' (stream all reasoning), 'compact' (show progress indicator), or 'silent' (no reasoning output during generation)."
     },
+    "max_tokens": {
+        "env_var": "LITELLM_MAX_TOKENS",
+        "toml_section": "litellm",
+        "toml_key": "max_tokens",
+        "default_value_key": "default_max_tokens",
+        "description": "Maximum number of tokens for the LLM response (e.g., 4096)."
+    },
+    "reasoning_effort": {
+        "env_var": "REASONING_EFFORT",
+        "toml_section": "litellm",
+        "toml_key": "reasoning_effort",
+        "default_value_key": "default_reasoning_effort", # Key for default in stream_llm_response
+        "allowed_values": ["low", "medium", "high"],
+        "description": "Controls the AI's internal 'thinking' phase: 'low' (minimal thinking, direct answer), 'medium' (standard thinking depth), 'high' (deep, detailed thinking process, may use more tokens/time)."
+    },
+    "reply_effort": {
+        "env_var": "REPLY_EFFORT",
+        "toml_section": "ui",
+        "toml_key": "reply_effort",
+        "default_value_key": "default_reply_effort", # Key for default in stream_llm_response
+        "allowed_values": ["low", "medium", "high"],
+        "description": "Controls the verbosity of the AI's final reply: 'low' (synthetic, concise summary), 'medium' (standard detail, default), 'high' (detailed and comprehensive report/explanation)."
+    }
 }
-
 
 
 
@@ -344,8 +365,23 @@ system_PROMPT = dedent("""\
 
     Core capabilities:
     0. Conversational Interaction:
-       - Engage in natural conversation. For simple greetings or chit-chat, respond conversationally without using tools.
+       - Engage in natural conversation.
+       - **For simple greetings (like "hello", "hi", "how are you?") or general chit-chat, you MUST respond conversationally and ABSOLUTELY DO NOT use any tools.**
+       - For other inputs, analyze the request to determine if a tool is necessary.
+
+    **Examples of Handling Simple Greetings (YOU MUST FOLLOW THESE PRECISELY):**
+    User: hello
+    Assistant: Hello! How can I help you today?
+
+    User: hi
+    Assistant: Hi there! What can I assist you with?
+
     1. Code Analysis & Discussion:
+       - Analyze code with expert-level insight.
+
+    User: hi
+    Assistant: Hi there! What can I assist you with?
+
        - Analyze code with expert-level insight.
        - Explain complex concepts clearly.
        - Suggest optimizations and best practices.
@@ -386,11 +422,11 @@ system_PROMPT = dedent("""\
 
     General Guidelines:
     1. Provide natural, conversational responses, always explaining your reasoning.
-    2. Use function calls (tools) *only when necessary* and after explaining your intent.
+    2. **PRIORITIZE CONVERSATIONAL RESPONSES FOR SIMPLE INPUTS, ESPECIALLY GREETINGS. DO NOT use function calls or tools for simple greetings or chit-chat (refer to the 'Examples of Handling Simple Greetings' above).** Use function calls (tools) *only when necessary* and after explaining your intent.
     3. For file operations:
        - Always try to read files first (e.g., using `read_file`) before editing them to understand the context.
        - For `edit_file`, use precise snippet matching.
-       - Clearly explain what changes you're making and why.
+       - Clearly explain what changes you're making and why before making a tool call.
        - Consider the impact of any changes on the overall codebase.
     4. All file paths provided to tools can be relative or absolute.
     5. Explanations for tool use should be clear and concise (ideally one sentence).
@@ -402,15 +438,26 @@ system_PROMPT = dedent("""\
     11. For Network Operations:
         - Clearly state the purpose of connecting to an endpoint.
         - Use `connect_local_mcp_stream` only for `http://localhost...` or `http://127.0.0.1...` URLs.
-        - Be mindful of potential timeouts or if the service is not running.
+        - Be mindful of potential timeouts or if the service is not running when using network tools.
         - The data returned will be a text summary or aggregation.
         - When `connect_local_mcp_stream` returns data, if it appears to be structured (e.g., JSON lines, logs), try to parse and summarize it meaningfully. If it's unstructured text, summarize its main content.
         - After `connect_remote_mcp_sse` provides a summary of events, analyze these events in the context of the user's original request. For example, if the user asked about a service's status, try to infer the status from the events.
     12. If a tool operation is cancelled by the user (indicated by a tool message like 'User cancelled execution...'), acknowledge the cancellation and ask the user for new instructions or how they would like to proceed. Do not re-attempt the cancelled operation unless explicitly asked to by the user.
 
-    IMPORTANT: If a user's request clearly requires a file operation or another tool, proceed to the tool call. For ambiguous or simple conversational inputs (like a greeting), prioritize a direct conversational response.
+    **Effort Control Settings (Instructions for AI)**:
+    For each of your turns, you will receive system instructions appended to the user's message, indicating the current `reasoning_effort` and `reply_effort` settings. You MUST adhere to these settings.
+    - `reasoning_effort` defines the depth of your internal thinking process:
+      - 'low': Minimize or skip an explicit internal thinking phase. Aim for a direct answer. Your internal reasoning, if any is exposed (e.g. via <think> tags or similar mechanisms if you use them), should be very brief.
+      - 'medium': Employ a standard, balanced thinking process.
+      - 'high': Engage in a detailed and thorough internal monologue or thinking process. Your internal reasoning, if exposed, should be comprehensive.
+    - `reply_effort` defines the verbosity and detail of your final reply to the user:
+      - 'low': Deliver a concise, summary-level answer, focusing on the key information. Be brief.
+      - 'medium': Offer a standard level of detail in your reply, balancing conciseness with completeness. This is the default if not specified.
+      - 'high': Provide a comprehensive, detailed, and expansive explanation in your final answer. Be thorough and elaborate.
 
-    Remember: You're a senior engineer - be thoughtful, precise, and explain your reasoning clearly.
+    IMPORTANT: If a user's request clearly requires a file operation or another tool, proceed to the tool call. For ambiguous or simple conversational inputs (like a greeting), prioritize a direct conversational response.
+    IMPORTANT: **Always prioritize a direct conversational response for simple or ambiguous inputs, especially greetings, as demonstrated in the provided examples. You MUST NOT attempt file operations or other tool calls for simple greetings.** Only proceed to a tool call if the user's request *unambiguously* requires a file operation or another tool.
+    Remember: You're a senior engineer - be thoughtful, precise, explain your reasoning clearly, and follow all instructions, including those regarding greetings, tool use, and effort settings.
 """)
 
 # --------------------------------------------------------------------------------
@@ -476,7 +523,7 @@ def _handle_remote_mcp_sse(endpoint_url: str, max_events: int, listen_timeout_se
     # URL validation is expected to be done by the caller (execute_function_call_dict)
     try:
         parsed_url = httpx.URL(endpoint_url)
-        if not parsed_url.scheme.lower() in ("http", "https"):
+        if parsed_url.scheme.lower() not in ("http", "https"):
             return f"Error: For connect_remote_mcp_sse, endpoint_url must be a valid HTTP/HTTPS URL. Provided: {endpoint_url}"
     except httpx.UnsupportedProtocol:
         return f"Error: Invalid or unsupported URL scheme for remote MCP SSE: {endpoint_url}"
@@ -680,6 +727,15 @@ def try_handle_set_command(user_input: str) -> bool:
         if "allowed_values" in param_config and value.lower() not in param_config["allowed_values"]:
             console.print(f"[red]Error: Invalid value '{value}' for '{param_name}'. Allowed values: {', '.join(param_config['allowed_values'])}[/red]")
             return True
+
+        if param_name == "max_tokens":
+            try:
+                int_value = int(value)
+                if int_value <= 0:
+                    raise ValueError("max_tokens must be a positive integer.")
+            except ValueError:
+                console.print(f"[red]Error: Invalid value '{value}' for 'max_tokens'. Must be a positive integer.[/red]")
+                return True
 
         RUNTIME_OVERRIDES[param_name] = value
         console.print(f"[green]✓ Parameter '{param_name}' set to '{value}' for the current session.[/green]")
@@ -952,7 +1008,7 @@ def execute_function_call_dict(tool_call_dict) -> str:
             # Basic validation before calling the handler
             try:
                 parsed_url = httpx.URL(endpoint_url)
-                if not parsed_url.scheme.lower() in ("http", "https"): # Allow http and https
+                if parsed_url.scheme.lower() not in ("http", "https"): # Allow http and https
                     return f"Error: For connect_remote_mcp_sse, endpoint_url must be a valid HTTP/HTTPS URL. Provided: {endpoint_url}"
             except Exception as e_val:
                 return f"Error validating remote MCP SSE URL '{endpoint_url}' before execution: {str(e_val)}"
@@ -991,56 +1047,81 @@ def stream_llm_response(user_message: str):
     Sends the conversation to the LLM using litellm and streams the response.
     Handles regular text responses, reasoning steps, and tool calls.
     """
-    # Add the user message to conversation history
-    conversation_history.append({"role": "user", "content": user_message})
-    
-    # Trim conversation history if it's getting too long
+    # Get configuration settings first, including reasoning_effort
     trim_conversation_history()
 
     try:
-        # Create a deep copy of the conversation history for this specific API call
-        # This prevents issues in testing where the mock might see a mutated list.
+        # Create a deep copy of the conversation history *before* this turn's user message.
+        # The user_message for this turn will be added to this copy, potentially augmented.
         messages_for_api_call = copy.deepcopy(conversation_history)
-
-        # Get model and API base from environment variables, with defaults
-        # Precedence: Env Var > config.toml > Hardcoded default
-        default_model = "deepseek-reasoner"
-        default_api_base = "https://api.deepseek.com/v1" 
-        default_reasoning_style = "full" # Default style if nothing else is set
-
-        toml_litellm_config = CONFIG_FROM_TOML.get("litellm", {})
-        toml_ui_config = CONFIG_FROM_TOML.get("ui", {})
         
-        # New precedence: RUNTIME_OVERRIDES > Env Var > config.toml > Hardcoded default
-        model_name = (
-            RUNTIME_OVERRIDES.get("model")
-            or os.getenv("LITELLM_MODEL")
-            or toml_litellm_config.get("model")
-            or default_model
-        )
-        api_base_url = (
-            RUNTIME_OVERRIDES.get("api_base")
-            or os.getenv("LITELLM_API_BASE")
-            or toml_litellm_config.get("api_base")
-            or default_api_base
-        )
-        reasoning_style = (
-            RUNTIME_OVERRIDES.get("reasoning_style")
-            or os.getenv("REASONING_STYLE")
-            or toml_ui_config.get("reasoning_style")
-            or default_reasoning_style
-        ).lower() # Ensure lowercase for consistent checking
-        # API key is expected to be set as an environment variable (e.g., DEEPSEEK_API_KEY)
+        # Define hardcoded defaults
+        default_model_val = "gpt-4o" # Default model
+        default_api_base_val = None # Let litellm handle default if not set
+        default_reasoning_style_val = "full"
+        default_max_tokens_val = 8192
+        default_reasoning_effort_val = "medium"
+        default_reply_effort_val = "medium"
 
-        # API call using litellm
-        stream = completion(
-            model=model_name,
-            messages=messages_for_api_call,
-            tools=tools,
-            max_tokens=8192,
-            api_base=api_base_url,           # Explicitly pass for this call
-            stream=True
+        toml_config_sections = {
+            "litellm": CONFIG_FROM_TOML.get("litellm", {}),
+            "ui": CONFIG_FROM_TOML.get("ui", {})
+        }
+
+        def get_config_value(param_name: str, default_value: Any) -> Any:
+            p_config = SUPPORTED_SET_PARAMS[param_name]
+            runtime_val = RUNTIME_OVERRIDES.get(param_name)
+            if runtime_val is not None:
+                # For boolean-like or numeric, ensure correct type if string from runtime
+                if p_config.get("allowed_values") and isinstance(runtime_val, str):
+                    return runtime_val # Keep as string for .lower() later if needed
+                # Add more type conversions if necessary, e.g., for max_tokens
+                return runtime_val
+            
+            env_val = os.getenv(p_config["env_var"])
+            if env_val is not None:
+                return env_val # Env vars are strings, handle conversion below
+            
+            toml_section_name = p_config.get("toml_section")
+            toml_key_name = p_config.get("toml_key")
+            if toml_section_name and toml_key_name:
+                toml_val = toml_config_sections.get(toml_section_name, {}).get(toml_key_name)
+                if toml_val is not None:
+                    return toml_val
+            
+            return default_value
+
+        model_name = get_config_value("model", default_model_val)
+        api_base_url = get_config_value("api_base", default_api_base_val)
+        reasoning_style = str(get_config_value("reasoning_style", default_reasoning_style_val)).lower()
+        
+        max_tokens_raw = get_config_value("max_tokens", default_max_tokens_val)
+        try:
+            max_tokens = int(max_tokens_raw)
+            if max_tokens <= 0:
+                max_tokens = default_max_tokens_val
+        except (ValueError, TypeError):
+            max_tokens = default_max_tokens_val
+
+        reasoning_effort_setting = str(get_config_value("reasoning_effort", default_reasoning_effort_val)).lower()
+        reply_effort_setting = str(get_config_value("reply_effort", default_reply_effort_val)).lower()
+        
+        # Prepare the user's message for this turn, augmenting it with effort control instructions.
+        # The system prompt (in messages_for_api_call[0]) already defines *what* these settings mean.
+        # Here, we provide the *current values* for this specific turn.
+        effort_instructions = (
+            f"\n\n[System Instructions For This Turn Only]:\n"
+            f"- Current `reasoning_effort`: {reasoning_effort_setting}\n"
+            f"- Current `reply_effort`: {reply_effort_setting}\n"
+            f"Please adhere to these specific effort levels for your reasoning and reply in this turn."
         )
+        augmented_user_message_content = user_message + effort_instructions
+        
+        messages_for_api_call.append({
+            "role": "user",
+            "content": augmented_user_message_content
+        })
+
 
         console.print("\n[bold bright_blue]🐋 Seeking...[/bold bright_blue]")
         reasoning_started_printed = False # Track if "💭 Reasoning:" has been printed
@@ -1052,6 +1133,15 @@ def stream_llm_response(user_message: str):
         # For "silent", we don't print it. For "compact", we print it once. For "full", we print it once.
         should_print_reasoning_header = reasoning_style in ["full", "compact"]
 
+        # API call using litellm
+        stream = completion(
+            model=model_name,
+            messages=messages_for_api_call,
+            tools=tools,
+            max_tokens=max_tokens, # Pass the determined max_tokens
+            api_base=api_base_url,           # Explicitly pass for this call
+            stream=True
+        )
 
         for chunk in stream:
             # Handle reasoning content if available
@@ -1112,6 +1202,9 @@ def stream_llm_response(user_message: str):
 
         console.print()  # New line after streaming is complete
 
+        # Add the original (non-augmented) user message to the global conversation history
+        conversation_history.append({"role": "user", "content": user_message})
+
         # Store the assistant's response in conversation history
         assistant_message = {
             "role": "assistant",
@@ -1151,7 +1244,6 @@ def stream_llm_response(user_message: str):
                 console.print(f"\n[bold bright_cyan]⚡ Executing {len(formatted_tool_calls)} function call(s)...[/bold bright_cyan]")
                 
                 executed_tool_call_ids_and_results = [] # To store results for history
-                all_tool_calls_confirmed_and_successful = True # Track if all operations proceed
 
                 for tool_call in formatted_tool_calls:
                     tool_name = tool_call['function']['name']
@@ -1184,18 +1276,15 @@ def stream_llm_response(user_message: str):
                         if confirmation not in ["y", "yes", ""]:
                             user_confirmed_or_not_risky = False
                             all_tool_calls_confirmed_and_successful = False
-                            result = f"User cancelled execution of {tool_name}."
-                            console.print(f"[yellow]ℹ️ Operation cancelled by user.[/yellow]")
+                            console.print("[yellow]ℹ️ Operation cancelled by user.[/yellow]")
                         
                     if user_confirmed_or_not_risky:
                         try:
                             result = execute_function_call_dict(tool_call)
-                            # Check if the result string itself indicates an error from execute_function_call_dict
+                           # Check if the result string itself indicates an error from execute_function_call_dict
                             if isinstance(result, str) and result.lower().startswith("error:"):
-                                all_tool_calls_confirmed_and_successful = False
+                                pass # Error is already handled and printed by execute_function_call_dict
                         except Exception as e_exec:
-                            function_name_from_tool_call = tool_call.get("function", {}).get("name", "unknown_tool")
-                            error_message_for_console = f"Error executing {function_name_from_tool_call}: {str(e_exec)}"
                             console.print(f"[red]{error_message_for_console}[/red]") # Already printed by execute_function_call_dict
                             result = f"Error: {str(e_exec)}" # This is the content for history
                             all_tool_calls_confirmed_and_successful = False
@@ -1221,8 +1310,8 @@ def stream_llm_response(user_message: str):
                 follow_up_stream = completion(
                     model=model_name,
                     messages=conversation_history, # History now contains tool results/cancellations
-                    tools=tools,
-                    max_tokens=8192,
+                    tools=tools, # Pass tools again for potential follow-up tool calls
+                    max_tokens=max_tokens, # Use the determined max_tokens
                     api_base=api_base_url,
                     stream=True
                 )
@@ -1289,7 +1378,7 @@ def main():
     # The welcome panel has been removed for a cleaner CLI startup.
     # Create an elegant instruction panel
     instructions = """[bold bright_blue]📁 File Operations:[/bold bright_blue]
-  • [bright_cyan]/add path/to/file[/bright_cyan] - Include a single file in conversation.
+  • [bright_cyan]/add path/to/file[/bright_cyan] - Include a single file in the conversation context.
   • [bright_cyan]/add path/to/folder[/bright_cyan] - Include all files in a folder.
   • [dim]The AI can automatically read and create files using function calls, and can use MCP servers.[/dim]
 
@@ -1297,8 +1386,8 @@ def main():
   • [bright_cyan]exit[/bright_cyan] or [bright_cyan]quit[/bright_cyan] - End the session
   • [bright_cyan]/set <parameter> <value>[/bright_cyan] - Change configuration for the current session.
     Example: [dim]/set reasoning_style compact[/dim]
-    Available: [dim]model, api_base, reasoning_style[/dim]
-  • [bright_cyan]Just ask naturally[/bright_cyan] - The AI will handle file operations automatically!"""
+    Available: [dim]model, api_base, reasoning_style, max_tokens, reasoning_effort, reply_effort[/dim]
+  • [bold white]Just ask naturally - the AI will handle file operations automatically![/bold white]"""
 
     
     console.print(Panel(
@@ -1330,7 +1419,7 @@ def main():
         if try_handle_set_command(user_input): # Add this line
             continue
 
-        response_data = stream_llm_response(user_input)
+        response_data = stream_llm_response(user_input) # user_input is the raw message
         
         if response_data.get("error"):
             # stream_llm_response already prints its own detailed API error.

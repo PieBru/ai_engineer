@@ -174,6 +174,20 @@ You> Now review this codebase structure
 - Real-time reasoning visibility during processing
 - Enhanced problem-solving capabilities
 
+#### **Key Configuration Options (via `config.toml` or Environment Variables):**
+*   `LITELLM_MODEL`: Specifies the language model to use (e.g., "deepseek-reasoner").
+*   `LITELLM_API_BASE`: Sets the API base URL for the chosen model provider.
+*   `LITELLM_MAX_TOKENS`: Sets the maximum tokens for the LLM response (default: 8192).
+*   `REASONING_STYLE`: Controls the verbosity of the AI's reasoning output.
+    *   `full` (default): Shows the complete reasoning text.
+    *   `compact`: Shows "💭 Reasoning..." once, then prints dots (`.`) for progress.
+    *   `silent`: Suppresses reasoning output entirely.
+*   `REASONING_EFFORT`: Controls the AI's reasoning depth by modifying the prompt.
+    *   `low`: Instructs the LLM for concise reasoning.
+    *   `medium` (default): Standard reasoning detail.
+    *   `high`: Instructs the LLM for highly detailed, step-by-step reasoning.
+*   These options can also be changed at runtime for the current session using the `/set` command (e.g., `/set model gpt-4o`).
+
 ### **High-Level Architecture**
 The following diagram illustrates the main components and their interactions within AI Engineer:
 
