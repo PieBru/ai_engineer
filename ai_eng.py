@@ -41,6 +41,37 @@ prompt_session = PromptSession(
 
 # Global dictionary to hold configurations loaded from config.toml
 CONFIG_FROM_TOML: Dict[str, Any] = {}
+RUNTIME_OVERRIDES: Dict[str, Any] = {}
+
+SUPPORTED_SET_PARAMS = {
+    "model": {
+        "env_var": "LITELLM_MODEL",
+        "toml_section": "litellm",
+        "toml_key": "model",
+        "default_value_key": "default_model", # Key for default in stream_llm_response
+        "description": "The language model to use (e.g., 'deepseek-reasoner', 'gpt-4o')."
+    },
+    "api_base": {
+        "env_var": "LITELLM_API_BASE",
+        "toml_section": "litellm",
+        "toml_key": "api_base",
+        "default_value_key": "default_api_base",
+        "description": "The API base URL for the model provider."
+    },
+    "reasoning_style": {
+        "env_var": "REASONING_STYLE",
+        "toml_section": "ui",
+        "toml_key": "reasoning_style",
+        "default_value_key": "default_reasoning_style",
+        "allowed_values": ["full", "compact", "silent"],
+        "description": "Verbosity of AI reasoning: 'full', 'compact', or 'silent'."
+    },
+}
+
+
+
+
+
 
 # --------------------------------------------------------------------------------
 # 1. Configure LLM client settings and load environment variables
@@ -617,6 +648,44 @@ def try_handle_add_command(user_input: str) -> bool:
         return True
     return False
 
+def try_handle_set_command(user_input: str) -> bool:
+    """
+    Handles the /set command to change configuration parameters at runtime.
+    """
+    prefix = "/set "
+    if user_input.strip().lower().startswith(prefix):
+        command_body = user_input[len(prefix):].strip()
+        if not command_body:
+            console.print("[yellow]Usage: /set <parameter> <value>[/yellow]")
+            console.print("[yellow]Available parameters to set:[/yellow]")
+            for p_name, p_config in SUPPORTED_SET_PARAMS.items():
+                console.print(f"  [bright_cyan]{p_name}[/bright_cyan]: {p_config['description']}")
+                if "allowed_values" in p_config:
+                    console.print(f"    Allowed: {', '.join(p_config['allowed_values'])}")
+            return True
+
+        command_parts = command_body.split(maxsplit=1)
+        if len(command_parts) < 2:
+            console.print("[yellow]Usage: /set <parameter> <value>[/yellow]")
+            return True
+
+        param_name, value = command_parts[0].lower(), command_parts[1]
+
+        if param_name not in SUPPORTED_SET_PARAMS:
+            console.print(f"[red]Error: Unknown parameter '{param_name}'. Supported parameters: {', '.join(SUPPORTED_SET_PARAMS.keys())}[/red]")
+            return True
+
+        param_config = SUPPORTED_SET_PARAMS[param_name]
+
+        if "allowed_values" in param_config and value.lower() not in param_config["allowed_values"]:
+            console.print(f"[red]Error: Invalid value '{value}' for '{param_name}'. Allowed values: {', '.join(param_config['allowed_values'])}[/red]")
+            return True
+
+        RUNTIME_OVERRIDES[param_name] = value
+        console.print(f"[green]✓ Parameter '{param_name}' set to '{value}' for the current session.[/green]")
+        return True
+    return False
+
 def add_directory_to_conversation(directory_path: str):
     with console.status("[bold bright_blue]🔍 Scanning directory...[/bold bright_blue]") as status:
         excluded_files = {
@@ -936,15 +1005,31 @@ def stream_llm_response(user_message: str):
         # Get model and API base from environment variables, with defaults
         # Precedence: Env Var > config.toml > Hardcoded default
         default_model = "deepseek-reasoner"
-        default_api_base = "https://api.deepseek.com/v1" # Ensure /v1 for DeepSeek
-        default_reasoning_style = "full"
+        default_api_base = "https://api.deepseek.com/v1" 
+        default_reasoning_style = "full" # Default style if nothing else is set
 
         toml_litellm_config = CONFIG_FROM_TOML.get("litellm", {})
         toml_ui_config = CONFIG_FROM_TOML.get("ui", {})
         
-        model_name = os.getenv("LITELLM_MODEL") or toml_litellm_config.get("model") or default_model
-        api_base_url = os.getenv("LITELLM_API_BASE") or toml_litellm_config.get("api_base") or default_api_base
-        reasoning_style = os.getenv("REASONING_STYLE") or toml_ui_config.get("reasoning_style") or default_reasoning_style
+        # New precedence: RUNTIME_OVERRIDES > Env Var > config.toml > Hardcoded default
+        model_name = (
+            RUNTIME_OVERRIDES.get("model")
+            or os.getenv("LITELLM_MODEL")
+            or toml_litellm_config.get("model")
+            or default_model
+        )
+        api_base_url = (
+            RUNTIME_OVERRIDES.get("api_base")
+            or os.getenv("LITELLM_API_BASE")
+            or toml_litellm_config.get("api_base")
+            or default_api_base
+        )
+        reasoning_style = (
+            RUNTIME_OVERRIDES.get("reasoning_style")
+            or os.getenv("REASONING_STYLE")
+            or toml_ui_config.get("reasoning_style")
+            or default_reasoning_style
+        ).lower() # Ensure lowercase for consistent checking
         # API key is expected to be set as an environment variable (e.g., DEEPSEEK_API_KEY)
 
         # API call using litellm
@@ -1201,33 +1286,26 @@ def stream_llm_response(user_message: str):
 # --------------------------------------------------------------------------------
 
 def main():
-    # Create a beautiful gradient-style welcome panel
-    welcome_text = """[bold bright_blue]🐋 AI Engineer[/bold bright_blue] [bright_cyan]with Function Calling[/bright_cyan]
-[dim blue]Powered by DeepSeek-R1 with Chain-of-Thought Reasoning[/dim blue]""" # Note: DeepSeek-R1 is kept as it's a specific model name
-    
-    console.print(Panel.fit(
-        welcome_text,
-        border_style="bright_blue",
-        padding=(1, 2),
-        title="[bold bright_cyan]🤖 AI Code Assistant[/bold bright_cyan]",
-        title_align="center"
-    ))
-    
+    # The welcome panel has been removed for a cleaner CLI startup.
     # Create an elegant instruction panel
     instructions = """[bold bright_blue]📁 File Operations:[/bold bright_blue]
-  • [bright_cyan]/add path/to/file[/bright_cyan] - Include a single file in conversation
-  • [bright_cyan]/add path/to/folder[/bright_cyan] - Include all files in a folder
-  • [dim]The AI can automatically read and create files using function calls[/dim]
+  • [bright_cyan]/add path/to/file[/bright_cyan] - Include a single file in conversation.
+  • [bright_cyan]/add path/to/folder[/bright_cyan] - Include all files in a folder.
+  • [dim]The AI can automatically read and create files using function calls, and can use MCP servers.[/dim]
 
 [bold bright_blue]🎯 Commands:[/bold bright_blue]
   • [bright_cyan]exit[/bright_cyan] or [bright_cyan]quit[/bright_cyan] - End the session
-  • Just ask naturally - the AI will handle file operations automatically!"""
+  • [bright_cyan]/set <parameter> <value>[/bright_cyan] - Change configuration for the current session.
+    Example: [dim]/set reasoning_style compact[/dim]
+    Available: [dim]model, api_base, reasoning_style[/dim]
+  • [bright_cyan]Just ask naturally[/bright_cyan] - The AI will handle file operations automatically!"""
+
     
     console.print(Panel(
         instructions,
         border_style="blue",
         padding=(1, 2),
-        title="[bold blue]💡 How to Use[/bold blue]",
+        title="[bold blue]🤖 AI Code Assistant - How to Use[/bold blue]",
         title_align="left"
     ))
     console.print()
@@ -1247,6 +1325,9 @@ def main():
             sys.exit(0) # Explicitly exit
 
         if try_handle_add_command(user_input):
+            continue
+
+        if try_handle_set_command(user_input): # Add this line
             continue
 
         response_data = stream_llm_response(user_input)
