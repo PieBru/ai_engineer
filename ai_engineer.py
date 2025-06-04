@@ -8,18 +8,14 @@ code analysis, and development assistance via natural conversation and function 
 """
 
 import os
-import sys
 import json
 from pathlib import Path
-# Removed: from textwrap import dedent # Used for system_PROMPT - now in prompts.py
-from typing import List, Dict, Any
+import sys # Keep sys for exit
+from typing import List
 from pydantic import BaseModel, ConfigDict
-# Removed: from dotenv import load_dotenv - now in config_utils.py
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
 from prompt_toolkit import PromptSession
-from prompt_toolkit.styles import Style as PromptStyle
 import time # For tool call IDs
 import subprocess # For /shell command
 import markdown # For /help command
@@ -27,7 +23,7 @@ import copy # For deepcopy
 import httpx # For new MCP tools
 # Removed: import tomllib # For reading TOML config (Python 3.11+) - now in config_utils.py
 
-# Import local modules
+# Import modules from src/
 from src.config_utils import (
     load_configuration as load_app_configuration, get_config_value,
     SUPPORTED_SET_PARAMS, MAX_FILES_TO_PROCESS_IN_DIR, MAX_FILE_SIZE_BYTES,
@@ -35,11 +31,11 @@ from src.config_utils import (
 )
 from src.file_utils import (
     normalize_path, is_binary_file, read_local_file as util_read_local_file, # Renamed read_local_file to util_read_local_file
-    create_file as util_create_file, apply_diff_edit as util_apply_diff_edit
+    create_file as util_create_file, apply_diff_edit as util_apply_diff_edit # Import file utility functions
 )
 from src.tool_defs import tools, RISKY_TOOLS
 from src.prompts import system_PROMPT
-
+from prompt_toolkit.styles import Style as PromptStyle # Keep PromptStyle import
 # Import litellm
 from litellm import completion
 from rich.markdown import Markdown as RichMarkdown # Import Rich's Markdown
@@ -54,15 +50,6 @@ prompt_session = PromptSession(
     })
 )
 
-# Removed: Global dictionary to hold configurations loaded from config.toml
-# Removed: CONFIG_FROM_TOML: Dict[str, Any] = {}
-# Removed: RUNTIME_OVERRIDES: Dict[str, Any] = {}
-
-# Removed: SUPPORTED_SET_PARAMS = { ... }
-
-# --------------------------------------------------------------------------------
-# 1. Configure LLM client settings and load environment variables
-# --------------------------------------------------------------------------------
 
 # Removed: def load_configuration(): ...
 # Removed: load_configuration() # Load configurations at startup
@@ -70,15 +57,6 @@ prompt_session = PromptSession(
 # Load configurations at startup using the imported function
 load_app_configuration(console)
 
-# Removed: Define module-level constants for limits
-# Removed: MAX_FILES_TO_PROCESS_IN_DIR = 1000 # Now imported
-# Removed: MAX_FILE_SIZE_BYTES = 5_000_000  # 5MB # Now imported
-# These are now imported from config_utils
-
-
-# --------------------------------------------------------------------------------
-# 2. Define our schema using Pydantic for type safety
-# --------------------------------------------------------------------------------
 class FileToCreate(BaseModel):
     path: str
     content: str
@@ -92,16 +70,6 @@ class FileToEdit(BaseModel):
 
     model_config = ConfigDict(extra='ignore', frozen=True)
 
-# Remove AssistantResponse as we're using function calling now
-
-# Removed: 2.1. Define Function Calling Tools
-# Removed: tools = [ ... ]
-# These are now imported from tool_defs
-
-
-# --------------------------------------------------------------------------------
-# 3. system prompt
-# --------------------------------------------------------------------------------
 
 # Removed: system_PROMPT = dedent(...)
 # This is now imported from prompts.py
@@ -221,101 +189,6 @@ def _handle_remote_mcp_sse(endpoint_url: str, max_events: int, listen_timeout_se
         # This will catch unexpected errors
         return f"An unexpected error occurred with remote MCP SSE '{endpoint_url}': {str(e)}"
 
-# Removed: read_local_file - now in file_utils.py (imported as util_read_local_file)
-
-# Removed: create_file - now in file_utils.py (imported as util_create_file)
-# The create_file function definition below is now redundant and should be removed.
-# Keeping it commented out for clarity during refactoring.
-# def create_file(path: str, content: str):
-#     """Create (or overwrite) a file at 'path' with the given 'content'."""
-#     # Policy: Disallow direct tilde usage in paths for creation for security/explicitness.
-#     # normalize_path would expand it, but we want to prevent it at this stage for this function.
-#     if path.lstrip().startswith('~'):
-#         raise ValueError("Home directory references not allowed")
-
-#     try:
-#         absolute_normalized_path_str = normalize_path(path)
-#     except ValueError as e: # Catch errors from normalize_path (e.g., ".." or other Path issues)
-#         console.print(f"[bold red]✗[/bold red] Could not create file. Invalid path: '[bright_cyan]{path}[/bright_cyan]'. Error: {e}")
-#         raise ValueError(f"Invalid path for create_file: {path}. Details: {e}") from e
-
-#     normalized_file_path_obj = Path(absolute_normalized_path_str)
-
-#     if len(content) > MAX_FILE_SIZE_BYTES:
-#         err_msg = f"File content exceeds {MAX_FILE_SIZE_BYTES // (1024*1024)}MB size limit"
-#         console.print(f"[bold red]✗[/bold red] {err_msg}")
-#         raise ValueError(err_msg)
-
-#     try:
-#         normalized_file_path_obj.parent.mkdir(parents=True, exist_ok=True)
-#         with open(normalized_file_path_obj, "w", encoding="utf-8") as f:
-#             f.write(content)
-#         console.print(f"[bold blue]✓[/bold blue] Created/updated file at '[bright_cyan]{normalized_file_path_obj}[/bright_cyan]'")
-#     except OSError as e:
-#         err_msg = f"Failed to write file '{normalized_file_path_obj}': {e}"
-#         console.print(f"[bold red]✗[/bold red] {err_msg}")
-#         raise OSError(err_msg) from e
-
-
-def show_diff_table(files_to_edit: List[FileToEdit]) -> None:
-    if not files_to_edit:
-        return
-
-    table = Table(title="📝 Proposed Edits", show_header=True, header_style="bold bright_blue", show_lines=True, border_style="blue")
-    table.add_column("File Path", style="bright_cyan", no_wrap=True)
-    table.add_column("Original", style="red dim")
-    table.add_column("New", style="bright_green")
-
-    for edit in files_to_edit:
-        table.add_row(edit.path, edit.original_snippet, edit.new_snippet)
-
-    console.print(table)
-
-# Removed: apply_diff_edit - now in file_utils.py (imported as util_apply_diff_edit)
-# The apply_diff_edit function definition below is now redundant and should be removed.
-# Keeping it commented out for clarity during refactoring.
-# def apply_diff_edit(path: str, original_snippet: str, new_snippet: str):
-#     """Reads the file at 'path', replaces the first occurrence of 'original_snippet' with 'new_snippet', then overwrites."""
-#     content = "" # Initialize content
-#     try:
-#         content = read_local_file(path) # Can raise FileNotFoundError, OSError
-
-#         # Verify we're replacing the exact intended occurrence
-#         occurrences = content.count(original_snippet)
-#         if occurrences == 0:
-#             raise ValueError("Original snippet not found")
-#         if occurrences > 1:
-#             console.print(f"[bold yellow]⚠ Multiple matches ({occurrences}) found - requiring line numbers for safety. Snippet found in '{path}'[/bold yellow]")
-#             console.print("[dim]Use format:\n--- original.py (lines X-Y)\n+++ modified.py[/dim]")
-#             raise ValueError(f"Ambiguous edit: {occurrences} matches")
-
-#         updated_content = content.replace(original_snippet, new_snippet, 1)
-
-#         # create_file can raise ValueError (bad path, size limit) or OSError (write error)
-#         create_file(path, updated_content)
-
-#         console.print(f"[bold blue]✓[/bold blue] Applied diff edit to '[bright_cyan]{path}[/bright_cyan]'")
-
-#     except FileNotFoundError: # From read_local_file
-#         msg = f"File not found for diff editing: '{path}'"
-#         console.print(f"[bold red]✗[/bold red] {msg}")
-#         raise FileNotFoundError(msg) from None # Propagate for tool
-#     except ValueError as e: # From snippet check, or from create_file (via normalize_path or size check)
-#         err_msg = str(e)
-#         console.print(f"[bold yellow]⚠[/bold yellow] {err_msg} in '[bright_cyan]{path}[/bright_cyan]'. No changes made.")
-#         if "Original snippet not found" in err_msg or "Ambiguous edit" in err_msg:
-#             # Avoid printing panels if snippet wasn't found (content might be empty) or if content is not available
-#             if "Original snippet not found" not in err_msg and content:
-#                 console.print("\n[bold blue]Expected snippet:[/bold blue]")
-#                 console.print(Panel(original_snippet, title="Expected", border_style="blue", title_align="left"))
-#                 console.print("\n[bold blue]Actual file content:[/bold blue]")
-#                 console.print(Panel(content, title="Actual", border_style="yellow", title_align="left"))
-#         # Always re-raise ValueError so the tool call reports an error
-#         raise ValueError(f"Failed to apply diff to '{path}': {err_msg}") from e
-#     except OSError as e: # From read_local_file or create_file
-#         err_msg = str(e)
-#         console.print(f"[bold red]✗[/bold red] OS error during diff edit for '{path}': {err_msg}")
-#         raise OSError(f"OS error during diff edit for '{path}': {err_msg}") from e
 
 
 def try_handle_add_command(user_input: str) -> bool:
@@ -332,7 +205,7 @@ def try_handle_add_command(user_input: str) -> bool:
                 # Handle a single file as before
                 # Use imported util_read_local_file
                 content = util_read_local_file(normalized_path)
-                conversation_history.append({
+                conversation_history.append({ # Add to global history
                     "role": "system",
                     "content": f"Content of file '{normalized_path}':\n\n{content}"
                 })
@@ -499,7 +372,7 @@ def try_handle_shell_command(user_input: str) -> bool:
         return True
     return False
 
-def try_handle_context_command(user_input: str) -> bool:
+def try_handle_context_command(user_input: str) -> bool: # Keep this function
     """
     Handles /context commands (save, load, list, summarize).
     """
@@ -578,7 +451,7 @@ def load_context(name: str):
         console.print(f"[bold red]✗[/bold red] Failed to load context from '{file_name}': {e}\n")
 
 def list_contexts(path: str):
-    """Lists potential context files in the specified directory."""
+    """Lists potential context files in the specified directory.""" # Keep this function
     try:
         # Use imported normalize_path
         normalized_path_str = normalize_path(path)
@@ -605,7 +478,7 @@ def list_contexts(path: str):
         console.print(f"[bold red]✗[/bold red] Failed to list contexts in '{path}': {e}\n")
 
 def summarize_context():
-    """Summarizes the current conversation history using the LLM and replaces the history."""
+    """Summarizes the current conversation history using the LLM and replaces the history.""" # Keep this function
     global conversation_history
 
     if len(conversation_history) <= 1: # Only system prompt
@@ -661,7 +534,7 @@ def summarize_context():
         # History remains unchanged on error
 
 
-def add_directory_to_conversation(directory_path: str):
+def add_directory_to_conversation(directory_path: str): # Keep this function
     with console.status("[bold bright_blue]🔍 Scanning directory...[/bold bright_blue]") as status:
         excluded_files = {
             # Python specific
@@ -707,8 +580,7 @@ def add_directory_to_conversation(directory_path: str):
         added_files = []
         total_files_processed = 0
 
-        for root, dirs, files in os.walk(directory_path):
-            # Use imported MAX_FILES_TO_PROCESS_IN_DIR
+        for root, dirs, files in os.walk(directory_path): # Use imported MAX_FILES_TO_PROCESS_IN_DIR
             if total_files_processed >= MAX_FILES_TO_PROCESS_IN_DIR:
                 console.print(f"[bold yellow]⚠[/bold yellow] Reached maximum file limit ({MAX_FILES_TO_PROCESS_IN_DIR})")
                 break
@@ -717,8 +589,7 @@ def add_directory_to_conversation(directory_path: str):
             # Skip hidden directories and excluded directories
             dirs[:] = [d for d in dirs if not d.startswith('.') and d not in excluded_files]
 
-            for file in files:
-                # Use imported MAX_FILES_TO_PROCESS_IN_DIR
+            for file in files: # Use imported MAX_FILES_TO_PROCESS_IN_DIR
                 if total_files_processed >= MAX_FILES_TO_PROCESS_IN_DIR:
                     break
 
@@ -734,12 +605,10 @@ def add_directory_to_conversation(directory_path: str):
                 full_path = str(Path(root) / file) # Use Path for consistency
 
                 try:
-                    # Check file size before processing - Use imported MAX_FILE_SIZE_BYTES
+                    # Check file size before processing
                     if os.path.getsize(full_path) > MAX_FILE_SIZE_BYTES:
                         skipped_files.append(f"{full_path} (exceeds size limit)")
                         continue
-
-                    # Check if it's binary - Use imported is_binary_file
                     if is_binary_file(full_path):
                         skipped_files.append(full_path)
                         continue
@@ -757,7 +626,7 @@ def add_directory_to_conversation(directory_path: str):
 
                 except OSError: # Catch read errors
                     skipped_files.append(str(full_path)) # Ensure it's a string
-                except ValueError as e: # Catch errors from normalize_path
+                except ValueError as e: # Catch errors from normalize_path # This line is missing in coverage
                      skipped_files.append(f"{full_path} (Invalid path: {e})")
 
 
@@ -774,10 +643,7 @@ def add_directory_to_conversation(directory_path: str):
                 console.print(f"  [dim]... and {len(skipped_files) - 10} more[/dim]")
         console.print() # Final newline after directory scan summary
 
-
-# Removed: is_binary_file - now in file_utils.py (imported)
-
-
+# Keep this function
 def ensure_file_in_context(file_path: str) -> bool:
     try:
         # Use imported normalize_path
@@ -797,9 +663,6 @@ def ensure_file_in_context(file_path: str) -> bool:
         console.print(f"[bold red]✗[/bold red] Could not read file '[bright_cyan]{file_path}[/bright_cyan]' for editing context: {e}")
         return False
 
-# Removed: normalize_path - now in file_utils.py (imported)
-
-
 # --------------------------------------------------------------------------------
 # 5. Conversation state
 # --------------------------------------------------------------------------------
@@ -813,9 +676,6 @@ conversation_history = [
 # 6. LLM API interaction with streaming
 # --------------------------------------------------------------------------------
 
-# RISKY_TOOLS is now imported from tool_defs.py
-# Removed: RISKY_TOOLS = {"create_file", "create_multiple_files", "edit_file", "connect_remote_mcp_sse"}
-
 
 def execute_function_call_dict(tool_call_dict) -> str:
     """Execute a function call from a dictionary format and return the result as a string."""
@@ -826,14 +686,12 @@ def execute_function_call_dict(tool_call_dict) -> str:
 
         if function_name == "read_file":
             file_path = arguments["file_path"]
-            # Use imported normalize_path
             normalized_path = normalize_path(file_path)
-            # Use imported util_read_local_file
             content = util_read_local_file(normalized_path)
             return f"Content of file '{normalized_path}':\n\n{content}"
 
         elif function_name == "read_multiple_files":
-            file_paths = arguments["file_paths"]
+            file_paths = arguments["file_paths"] # This line is missing in coverage
             results = []
             # Use imported normalize_path and util_read_local_file
             for file_path in file_paths:
@@ -841,14 +699,13 @@ def execute_function_call_dict(tool_call_dict) -> str:
                     normalized_path = normalize_path(file_path)
                     content = util_read_local_file(normalized_path)
                     results.append(f"Content of file '{normalized_path}':\n\n{content}")
-                except (OSError, ValueError) as e: # Catch read errors or normalize errors
+                except (OSError, ValueError) as e: # Catch read errors or normalize errors # This line is missing in coverage
                     results.append(f"Error reading '{file_path}': {e}")
             return "\n\n" + "="*50 + "\n\n".join(results)
 
         elif function_name == "create_file":
             file_path = arguments["file_path"]
             content = arguments["content"]
-            # Use imported util_create_file and MAX_FILE_SIZE_BYTES
             util_create_file(file_path, content, console, MAX_FILE_SIZE_BYTES)
             return f"Successfully created file '{file_path}'"
 
@@ -864,10 +721,8 @@ def execute_function_call_dict(tool_call_dict) -> str:
                 try:
                     # In the test TestHelperFunctions.test_execute_function_call_dict,
                     # de.create_file is mocked (as mock_create).
-                    # The mock's side_effect is [None, Exception("Create multiple sub-error")]
-                    # So, the first call to util_create_file("f_ok.txt", "c_ok") will not raise.
-                    # Use imported util_create_file and MAX_FILE_SIZE_BYTES
-                    # The second call to de.create_file("f_err.txt", "c_err") will raise Exception.
+                    # The test mocks the imported util_create_file.
+                    # Call the imported function directly.
                     util_create_file(path, content, console, MAX_FILE_SIZE_BYTES)
                     successful_paths.append(path)
                     success_messages_for_result.append(f"File {path} created.")
@@ -892,7 +747,6 @@ def execute_function_call_dict(tool_call_dict) -> str:
             if not ensure_file_in_context(file_path):
                 return f"Error: Could not read file '{file_path}' for editing"
 
-            # Use imported util_apply_diff_edit and MAX_FILE_SIZE_BYTES
             util_apply_diff_edit(file_path, original_snippet, new_snippet, console, MAX_FILE_SIZE_BYTES)
             return f"Successfully edited file '{file_path}'"
 
@@ -909,7 +763,6 @@ def execute_function_call_dict(tool_call_dict) -> str:
             except Exception as e_val:
                 return f"Error validating local MCP stream URL '{endpoint_url}' before execution: {str(e_val)}"
 
-            # Keep this handler here
             return _handle_local_mcp_stream(endpoint_url, timeout_seconds, max_data_chars)
 
         elif function_name == "connect_remote_mcp_sse":
@@ -925,7 +778,6 @@ def execute_function_call_dict(tool_call_dict) -> str:
             except Exception as e_val:
                 return f"Error validating remote MCP SSE URL '{endpoint_url}' before execution: {str(e_val)}"
 
-            # Keep this handler here
             return _handle_remote_mcp_sse(endpoint_url, max_events, listen_timeout_seconds)
 
 
@@ -933,7 +785,7 @@ def execute_function_call_dict(tool_call_dict) -> str:
             return f"Unknown function: {function_name}"
 
     except Exception as e:
-        # This block handles errors from json.loads or any of the specific tool functions
+        # This block handles errors from json.loads or any of the specific tool functions # This line is missing in coverage
         error_message = f"Error executing {function_name}: {str(e)}"
         console.print(f"[red]{error_message}[/red]") # Print the error to console
         return error_message # Return the error message string
@@ -970,10 +822,6 @@ def stream_llm_response(user_message: str):
         # The user_message for this turn will be added to this copy, potentially augmented.
         messages_for_api_call = copy.deepcopy(conversation_history)
 
-        # Define hardcoded defaults (these are fallback if not in TOML/Env/Runtime)
-        default_model_val = "gpt-4o" # Default model
-        default_api_base_val = None # Let litellm handle default if not set
-        default_reasoning_style_val = "full"
         default_max_tokens_val = 8192
         default_reasoning_effort_val = "medium"
         default_reply_effort_val = "medium"
@@ -982,10 +830,10 @@ def stream_llm_response(user_message: str):
         # Removed local get_config_value definition.
         # Use the imported get_config_value function.
         # It already uses CONFIG_FROM_TOML, RUNTIME_OVERRIDES, SUPPORTED_SET_PARAMS which are imported globals.
-
-        model_name = get_config_value("model", default_model_val)
-        api_base_url = get_config_value("api_base", default_api_base_val)
-        reasoning_style = str(get_config_value("reasoning_style", default_reasoning_style_val)).lower()
+        # Use imported constants for defaults where applicable
+        model_name = get_config_value("model", "gpt-4o") # Use a reasonable default if not configured
+        api_base_url = get_config_value("api_base", None) # Let litellm handle default if not configured
+        reasoning_style = str(get_config_value("reasoning_style", "full")).lower()
 
         max_tokens_raw = get_config_value("max_tokens", default_max_tokens_val)
         try:
@@ -999,7 +847,7 @@ def stream_llm_response(user_message: str):
         try:
             temperature = float(temperature_raw)
             # Use imported get_config_value
-            # Optional: Add range validation here if desired, e.g., if not (0.0 <= temperature <= 2.0): ...
+            # Optional: Add range validation here if desired, e.g., if not (0.0 <= temperature <= 2.0):
         except (ValueError, TypeError):
             console.print(f"[yellow]Warning: Invalid temperature value '{temperature_raw}'. Using default {default_temperature_val}.[/yellow]")
             temperature = default_temperature_val
@@ -1023,8 +871,6 @@ def stream_llm_response(user_message: str):
             "content": augmented_user_message_content
         })
 
-        # tools and RISKY_TOOLS are now imported globally
-
         console.print("\n[bold bright_blue]🐋 Seeking...[/bold bright_blue]")
         reasoning_content_accumulated = "" # To store full reasoning if needed later
         final_content = ""
@@ -1039,11 +885,11 @@ def stream_llm_response(user_message: str):
         # API call using litellm
         stream = completion(
             model=model_name,
-            messages=messages_for_api_call,
-            tools=tools, # Use imported tools
-            max_tokens=max_tokens, # Pass the determined max_tokens
-            api_base=api_base_url,           # Explicitly pass for this call
-            temperature=temperature, # Pass the determined temperature
+            messages=messages_for_api_call, # Use the augmented messages
+            tools=tools, # Use imported tools # This line is missing in coverage
+            max_tokens=max_tokens, # Pass the determined max_tokens # This line is missing in coverage
+            api_base=api_base_url,           # Explicitly pass for this call # This line is missing in coverage
+            temperature=temperature, # Pass the determined temperature # This line is missing in coverage
             stream=True
         )
 
@@ -1155,7 +1001,6 @@ def stream_llm_response(user_message: str):
                     console.print(f"[bright_blue]→ {tool_name}[/bright_blue]")
 
                     user_confirmed_or_not_risky = True
-                    # Use imported RISKY_TOOLS
                     if tool_name in RISKY_TOOLS:
                         console.print(f"[bold yellow]⚠️ This is a risky operation: {tool_name}[/bold yellow]")
                         # Provide a summary of the operation
@@ -1195,7 +1040,7 @@ def stream_llm_response(user_message: str):
                         confirmation = prompt_session.prompt("Proceed with this operation? [Y/n]: ", default="y").strip().lower()
                         if confirmation not in ["y", "yes", ""]:
                             user_confirmed_or_not_risky = False
-                            # all_tool_calls_confirmed_and_successful = False # This flag is not used consistently, remove or fix
+                            # all_tool_calls_confirmed_and_successful = False # This flag is not used consistently, remove or fix # This line is missing in coverage
                             console.print("[yellow]ℹ️ Operation cancelled by user.[/yellow]")
                             result = "User cancelled execution of this tool call." # Result for history
                         # else: user_confirmed_or_not_risky remains True, proceed to execution
@@ -1208,7 +1053,7 @@ def stream_llm_response(user_message: str):
                                 pass # Error is already handled and printed by execute_function_call_dict
                                 # The result string itself is the error message for history
                         except Exception as e_exec:
-                            # This catch block might be redundant if execute_function_call_dict catches and returns string errors
+                            # This catch block might be redundant if execute_function_call_dict catches and returns string errors # This line is missing in coverage
                             # Let's keep it for safety but note that execute_function_call_dict should handle its own exceptions
                             console.print(f"[red]Unexpected error during tool execution: {str(e_exec)}[/red]")
                             result = f"Error: Unexpected error during tool execution: {str(e_exec)}" # This is the content for history
@@ -1235,9 +1080,9 @@ def stream_llm_response(user_message: str):
                 # Use imported tools again for potential follow-up tool calls
                 follow_up_stream = completion(
                     model=model_name,
-                    messages=conversation_history, # History now contains tool results/cancellations
-                    tools=tools, # Pass tools again for potential follow-up tool calls
-                    max_tokens=max_tokens, # Use the determined max_tokens
+                    messages=conversation_history, # History now contains tool results/cancellations # This line is missing in coverage
+                    tools=tools, # Pass tools again for potential follow-up tool calls # This line is missing in coverage
+                    max_tokens=max_tokens, # Use the determined max_tokens # This line is missing in coverage
                     api_base=api_base_url,
                     stream=True
                 )
@@ -1292,7 +1137,7 @@ def stream_llm_response(user_message: str):
         return {"success": True}
 
     except Exception as e:
-        error_msg = f"LLM API error: {str(e)}"
+        error_msg = f"LLM API error: {str(e)}" # This line is missing in coverage
         console.print(f"\n[bold red]❌ {error_msg}[/bold red]")
         return {"error": error_msg}
 
@@ -1302,26 +1147,17 @@ def stream_llm_response(user_message: str):
 # --------------------------------------------------------------------------------
 
 def main():
-    # The welcome panel has been removed for a cleaner CLI startup.
-    # Create an elegant instruction panel
-#    instructions = """[bold bright_blue]📁 File Operations:[/bold bright_blue]
-#  • [bright_cyan]/add path/to/file_or_folder[/bright_cyan] - Add file/folder to context.
-#  • [dim]The AI can automatically read and create files using function calls, and can use MCP servers.[/dim]
-#
-#[bold bright_blue]🎯 Commands:[/bold bright_blue]
-#  • [bright_cyan]exit[/bright_cyan] or [bright_cyan]quit[/bright_cyan] - End the session
-#  • [bright_cyan]/set <parameter> <value>[/bright_cyan] - Change configuration for the current session.
-#    Example: [dim]/set reasoning_style compact[/dim]
-#    Available: [dim]model, api_base, reasoning_style, max_tokens, reasoning_effort, reply_effort, temperature[/dim]
-#  • [bright_cyan]/help[/bright_cyan] - Display detailed help information.
-#  • [bright_cyan]/shell [command][/bright_cyan] - Execute a shell command and add output to history.
-#  • [bright_cyan]/context save <name>[/bright_cyan] - Save current conversation context.
-#  • [bright_cyan]/context load <name>[/bright_cyan] - Load a saved conversation context.
-#  • [bright_cyan]/context list [path][/bright_cyan] - List saved contexts.
-#  • [bright_cyan]/context summarize[/bright_cyan] - Summarize current context using the LLM.
-#  • [bold white]Just ask naturally - the AI will handle file operations automatically![/bold white]"""
+    # Create an elegant instruction panel listing key commands
+    instructions = """[bold bright_blue]📁 File Operations:[/bold bright_blue]
+  • [bright_cyan]/add path/to/file_or_folder[/bright_cyan] - Add file/folder to context.
 
-    instructions = """  • [bright_cyan]/help[/bright_cyan] - Display detailed help information.
+[bold bright_blue]🎯 Commands:[/bold bright_blue]
+  • [bright_cyan]exit[/bright_cyan] or [bright_cyan]quit[/bright_cyan] - End the session
+  • [bright_cyan]/set <param> <value>[/bright_cyan] - Change session config.
+  • [bright_cyan]/help[/bright_cyan] - Display detailed help.
+  • [bright_cyan]/shell <cmd>[/bright_cyan] - Execute shell command.
+  • [bright_cyan]/context <subcommand>[/bright_cyan] - Manage conversation history.
+
   • [bold white]Just ask naturally - the AI will handle file operations automatically![/bold white]"""
 
 
@@ -1348,23 +1184,18 @@ def main():
             console.print("[bold bright_blue]👋 Goodbye! Happy coding![/bold bright_blue]")
             sys.exit(0) # Explicitly exit
 
-        # Use imported try_handle_add_command
+        # Check for and handle commands
         if try_handle_add_command(user_input):
             continue
 
-        # Use imported try_handle_set_command
         if try_handle_set_command(user_input):
             continue
 
-        # Use the new try_handle_help_command
         if try_handle_help_command(user_input):
             continue
 
-        # Use the new try_handle_shell_command
         if try_handle_shell_command(user_input):
             continue
-
-        # Use the new try_handle_context_command
         if try_handle_context_command(user_input):
             continue
 

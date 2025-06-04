@@ -9,18 +9,26 @@ from rich.panel import Panel # For apply_diff_edit
 
 def normalize_path(path_str: str) -> str:
     """Return a canonical, absolute version of the path with security checks."""
+    if not path_str:
+        raise ValueError("Invalid path: Path cannot be empty.") # Changed error message for consistency
     try:
-        if not path_str:
-            raise ValueError("Path cannot be empty.")
         expanded_path = Path(path_str).expanduser()
+
+        # Explicitly check for ".." components before full resolution
+        # if the intent is to disallow ".." syntactically.
+        # This matches the expectation of several security-related tests.
         if ".." in expanded_path.parts:
             raise ValueError(f"Invalid path: {path_str} contains parent directory references")
-        resolved_path = expanded_path.resolve()
+
+        # Path.resolve() handles '.', and symlinks securely.
+        resolved_path = expanded_path.resolve() # Removed strict=True
         return str(resolved_path)
-    except (TypeError, ValueError) as e:
-        raise ValueError(f"Invalid path: \"{path_str}\". Error: {e}") from e
-    except Exception as e:
-        raise ValueError(f"Error normalizing path: \"{path_str}\". Details: {e}") from e
+    except ValueError as e: # From our ".." check or Path() constructor if path_str is malformed
+        if "parent directory references" in str(e): # Re-raise our custom error
+            raise
+        raise ValueError(f"Invalid path string: \"{path_str}\". Error: {e}") from e
+    except Exception as e: # Catch-all for other unexpected issues during path operations
+        raise ValueError(f"Unexpected error normalizing path: \"{path_str}\". Details: {e}") from e
 
 def is_binary_file(file_path: str, peek_size: int = 1024) -> bool:
     """Checks if a file is likely binary by looking for null bytes."""
@@ -111,7 +119,7 @@ def apply_diff_edit(path: str, original_snippet: str, new_snippet: str, console_
     except ValueError as e:
         err_msg = str(e)
         console_obj.print(f"[bold yellow]⚠[/bold yellow] {err_msg} in '[bright_cyan]{normalized_path_str or path}[/bright_cyan]'. No changes made.")
-        if "Original snippet not found" not in err_msg and "Ambiguous edit" not in err_msg and content:
+        if "Original snippet not found" in err_msg or "Ambiguous edit" in err_msg: # Corrected condition
             console_obj.print("\n[bold blue]Expected snippet:[/bold blue]")
             console_obj.print(Panel(original_snippet, title="Expected", border_style="blue", title_align="left"))
             console_obj.print("\n[bold blue]Actual file content:[/bold blue]")

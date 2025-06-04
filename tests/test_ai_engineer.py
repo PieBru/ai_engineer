@@ -6,17 +6,18 @@ import pytest
 import os
 import json
 import sys # Import the sys module
-from pathlib import Path
+from pathlib import Path, PosixPath # Import PosixPath for mocking Path objects
 from unittest.mock import patch, MagicMock, call, ANY
 
 # Add the project root to sys.path to allow importing deepseek_eng
 # Assuming file is now ai_eng.py
+project_root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys_path_updated = False
 try:
-    import ai_eng as de
+    import ai_engineer as de
 except ImportError:
-    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-    import ai_eng as de
+    sys.path.insert(0, project_root_path)
+    import ai_engineer as de
     sys_path_updated = True
 
 
@@ -37,7 +38,7 @@ def reset_globals_and_mocks(monkeypatch):
     yield # Test runs here
 
     # Teardown: Clean up sys.path if it was modified for this test session
-    if sys_path_updated and sys.path[0].endswith('ai-engineer'): # Assuming project dir might also be renamed
+    if sys_path_updated and sys.path[0] == project_root_path:
         sys.path.pop(0)
 
 
@@ -155,7 +156,7 @@ class TestHelperFunctions:
             de.util_create_file("~/should_not_create.txt", "test", de.console, de.MAX_FILE_SIZE_BYTES)
  
         # Test create_file when normalize_path raises an error (e.g., invalid path components)
-        with patch('src.file_utils.normalize_path', side_effect=ValueError("Simulated normalize_path error")):
+        with patch('src.file_utils.normalize_path', side_effect=ValueError("Simulated normalize_path error")): # Patch where it's used internally by create_file
             with pytest.raises(ValueError, match="Invalid path for create_file: ../invalid.txt. Details: Simulated normalize_path error"): # This is the line 160 from your traceback
                 de.util_create_file("../invalid.txt", "content", de.console, de.MAX_FILE_SIZE_BYTES) # Use util_ prefix and add args
         de.console.print.assert_any_call("[bold red]✗[/bold red] Could not create file. Invalid path: '[bright_cyan]../invalid.txt[/bright_cyan]'. Error: Simulated normalize_path error") # ai_eng.console
@@ -256,10 +257,10 @@ class TestHelperFunctions:
         de.trim_conversation_history()
         assert len(de.conversation_history) > 1 # Should keep all system messages
 
-    @patch('ai_eng.util_read_local_file')
-    @patch('ai_eng.util_create_file') 
-    @patch('ai_eng.util_apply_diff_edit')
-    @patch('ai_eng.ensure_file_in_context', return_value=True) 
+    @patch('ai_engineer.util_read_local_file')
+    @patch('ai_engineer.util_create_file')
+    @patch('ai_engineer.util_apply_diff_edit')
+    @patch('ai_engineer.ensure_file_in_context', return_value=True)
     def test_execute_function_call_dict(self, mock_ensure_context, mock_apply_diff, mock_create, mock_read, tmp_path): # mock_read is still patching the old name here, needs update - FIX THIS PATCH
         # read_file
         mock_read.return_value = "file content"
@@ -351,8 +352,8 @@ class TestHelperFunctions:
 
 
 class TestCommandHandling:
-    @patch('ai_eng.util_read_local_file')
-    @patch('ai_eng.add_directory_to_conversation') # This patch is correct
+    @patch('ai_engineer.util_read_local_file') # Patch the imported function
+    @patch('ai_engineer.add_directory_to_conversation') # Patch the function in ai_engineer
     def test_try_handle_add_command_file(self, mock_add_dir, mock_read_file, tmp_path): # mock_read_file is patching the old name - FIX THIS PATCH
         mock_read_file.return_value = "file content"
         file_to_add = tmp_path / "my_file.txt"
@@ -368,7 +369,7 @@ class TestCommandHandling:
             assert f"Content of file '{de.normalize_path(str(file_to_add))}'" in de.conversation_history[1]["content"]
             mock_add_dir.assert_not_called()
 
-    @patch('ai_eng.add_directory_to_conversation')
+    @patch('ai_engineer.add_directory_to_conversation') # Patch the function in ai_engineer
     def test_try_handle_add_command_directory(self, mock_add_dir, tmp_path):
         dir_to_add = tmp_path / "my_dir"
         dir_to_add.mkdir()
@@ -383,16 +384,18 @@ class TestCommandHandling:
         assert not de.try_handle_add_command("some other command")
 
     @patch('os.path.isdir', return_value=False) # Assume it's a file
-    @patch('ai_eng.util_read_local_file', side_effect=OSError("Permission denied")) # Update patch target
+    @patch('ai_engineer.util_read_local_file', side_effect=OSError("Permission denied")) # Patch the imported function
     def test_try_handle_add_command_file_error(self, mock_read_file, mock_isdir, tmp_path, capsys):
-        file_path = tmp_path / "error_file.txt"
-        # No need to create file as read_local_file is mocked to raise OSError
+        # Create a file that normalize_path can resolve (even if it's empty)
+        # The error will come from the mocked util_read_local_file
+        file_path_obj = tmp_path / "error_file.txt"
+        file_path_obj.touch()
         
-        handled = de.try_handle_add_command(f"/add {str(file_path)}")
+        handled = de.try_handle_add_command(f"/add {str(file_path_obj)}")
         assert handled
         # Check the string representation of the Rich Text/Markup object passed to the mocked console
         actual_output_str = str(de.console.print.call_args_list[-1][0][0])
-        assert f"Could not add path '[bright_cyan]{str(file_path)}[/bright_cyan]': Permission denied" in actual_output_str
+        assert f"Could not add path '[bright_cyan]{str(file_path_obj)}[/bright_cyan]': Permission denied" in actual_output_str
         assert len(de.conversation_history) == 1 # Only system prompt
     
     def test_add_directory_to_conversation_max_files(self, tmp_path, monkeypatch):
@@ -484,8 +487,8 @@ class TestCommandHandling:
 
 class TestStreamLLMResponse:
 
-    @patch('ai_eng.completion')
-    @patch('ai_eng.trim_conversation_history')
+    @patch('ai_engineer.completion')
+    @patch('ai_engineer.trim_conversation_history')
     def test_simple_text_response(self, mock_trim, mock_litellm_completion, mock_env_vars):
         mock_stream = iter([
             create_mock_litellm_chunk(content="Hello, "),
@@ -536,7 +539,7 @@ class TestStreamLLMResponse:
         de.console.print.assert_any_call("world!", end="")
 
 
-    @patch('ai_eng.completion')
+    @patch('ai_engineer.completion')
     def test_response_with_reasoning(self, mock_litellm_completion, mock_env_vars):
         mock_stream = iter([
             create_mock_litellm_chunk(reasoning_content="Thinking... "),
@@ -573,8 +576,8 @@ class TestStreamLLMResponse:
         de.console.print.assert_any_call("Okay, ", end="")
         de.console.print.assert_any_call("done.", end="")
 
-    @patch('ai_eng.completion')
-    @patch('ai_eng.execute_function_call_dict')
+    @patch('ai_engineer.completion')
+    @patch('ai_engineer.execute_function_call_dict')
     def test_response_with_tool_calls(self, mock_execute_func, mock_litellm_completion, mock_env_vars):
         # First call: requests a tool
         tool_call_request_stream = iter([
@@ -654,14 +657,14 @@ class TestStreamLLMResponse:
         assert reasoning_in_follow_up_printed, "Reasoning in follow-up not printed"
 
 
-    @patch('ai_eng.completion', side_effect=Exception("API Connection Error"))
+    @patch('ai_engineer.completion', side_effect=Exception("API Connection Error"))
     def test_api_error(self, mock_litellm_completion, mock_env_vars):
         response = de.stream_llm_response("Trigger error")
         assert response["error"] == "LLM API error: API Connection Error"
         de.console.print.assert_any_call("\n[bold red]❌ LLM API error: API Connection Error[/bold red]")
 
-    @patch('ai_eng.completion')
-    @patch('ai_eng.execute_function_call_dict', side_effect=Exception("Tool execution failed"))
+    @patch('ai_engineer.completion')
+    @patch('ai_engineer.execute_function_call_dict', side_effect=Exception("Tool execution failed"))
     def test_tool_call_execution_error(self, mock_execute_func, mock_litellm_completion, mock_env_vars):
         # Stream for initial tool call request
         tool_call_request_stream = iter([
@@ -699,8 +702,8 @@ class TestStreamLLMResponse:
 
 
 class TestMainLoop:
-    @patch('ai_eng.stream_llm_response')
-    @patch('ai_eng.try_handle_add_command', return_value=False) # Assume no /add commands
+    @patch('ai_engineer.stream_llm_response')
+    @patch('ai_engineer.try_handle_add_command', return_value=False) # Assume no /add commands
     def test_main_loop_exit_quit(self, mock_handle_add, mock_stream_response, monkeypatch):
         # Test 'exit'
         de.prompt_session.prompt = MagicMock(return_value="exit")
@@ -722,8 +725,8 @@ class TestMainLoop:
         mock_stream_response.assert_not_called()
         de.console.print.assert_any_call("[bold bright_blue]👋 Goodbye! Happy coding![/bold bright_blue]")
 
-    @patch('ai_eng.stream_llm_response')
-    @patch('ai_eng.try_handle_add_command', return_value=False)
+    @patch('ai_engineer.stream_llm_response')
+    @patch('ai_engineer.try_handle_add_command', return_value=False)
     def test_main_loop_eof_keyboard_interrupt(self, mock_handle_add, mock_stream_response, monkeypatch):
         # Test EOFError
         de.prompt_session.prompt = MagicMock(side_effect=EOFError)
@@ -744,8 +747,8 @@ class TestMainLoop:
         mock_stream_response.assert_not_called()
         de.console.print.assert_any_call("\n[bold yellow]👋 Exiting gracefully...[/bold yellow]")
 
-    @patch('ai_eng.stream_llm_response', return_value={"success": True})
-    @patch('ai_eng.try_handle_add_command', return_value=False)
+    @patch('ai_engineer.stream_llm_response', return_value={"success": True})
+    @patch('ai_engineer.try_handle_add_command', return_value=False)
     def test_main_loop_empty_and_normal_input(self, mock_handle_add, mock_stream_response, monkeypatch):
         # Simulate empty input, then normal input, then exit
         de.prompt_session.prompt = MagicMock(side_effect=["", "hello", KeyboardInterrupt])
@@ -756,8 +759,8 @@ class TestMainLoop:
         # Check that empty input "" did not lead to a call to stream_llm_response before "hello"
         assert mock_stream_response.call_args_list == [call("hello")]
 
-    @patch('ai_eng.stream_llm_response', return_value={"error": "Simulated API Error"})
-    @patch('ai_eng.try_handle_add_command', return_value=False)
+    @patch('ai_engineer.stream_llm_response', return_value={"error": "Simulated API Error"})
+    @patch('ai_engineer.try_handle_add_command', return_value=False)
     def test_main_loop_llm_error(self, mock_handle_add, mock_stream_response, monkeypatch):
         # Simulate normal input, then LLM error, then exit
         de.prompt_session.prompt = MagicMock(side_effect=["ask something", KeyboardInterrupt])

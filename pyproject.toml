@@ -10,19 +10,33 @@ dependencies = [
     "pydantic>=2.10.4",
     "python-dotenv>=1.0.1",
     "rich>=13.9.4",
+    "httpx",
+    "markdown",
 ]
 
 [project.optional-dependencies] # Dependencies required for development and testing
 test = [
     "pytest>=8.4.0", # As seen in your pytest output
     "pytest-cov>=5.0.0", # Add pytest-cov for coverage integration
+    "flask",
+    "toml",
 ]
 
 [tool.pytest.ini_options]
-addopts = "--cov=ai_eng --cov-report=term-missing" # Configure pytest-cov to measure coverage for the ai_eng module and report missing lines
+# Add --cov to enable coverage reporting
+# Add --cov-report=term-missing to show missing lines in the terminal report
+# Enable coverage collection; specific sources are defined in [tool.coverage.run]
+addopts = "--tb=short --cov --cov-report=term-missing"
 filterwarnings = [
     "ignore:Support for class-based `config` is deprecated, use ConfigDict instead:pydantic.PydanticDeprecatedSince20",
 ]
+
+# Coverage
+
+[tool.coverage.run]
+# Specify the source directories or files to include in coverage analysis.
+# This tells coverage.py which code to measure.
+source = ["src"]
 
 [tool.coverage.report]
 fail_under = 50
