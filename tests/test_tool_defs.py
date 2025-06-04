@@ -1,5 +1,4 @@
 # tests/test_tool_defs.py
-import pytest
 from src.tool_defs import RISKY_TOOLS, tools
 
 def test_risky_tools_is_set():

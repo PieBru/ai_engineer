@@ -1,7 +1,5 @@
 # /run/media/piero/NVMe-4TB/Piero/AI/AI-Engineer/file_utils.py
-import os
 from pathlib import Path
-from typing import List
 from rich.panel import Panel # For apply_diff_edit
 
 # MAX_FILE_SIZE_BYTES will be imported from config_utils by the calling code

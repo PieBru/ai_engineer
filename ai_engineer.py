@@ -11,14 +11,12 @@ import os
 import json
 from pathlib import Path
 import sys # Keep sys for exit
-from typing import List
 from pydantic import BaseModel, ConfigDict
 from rich.console import Console
 from rich.panel import Panel
 from prompt_toolkit import PromptSession
 import time # For tool call IDs
 import subprocess # For /shell command
-import markdown # For /help command
 import copy # For deepcopy
 import httpx # For new MCP tools
 # Removed: import tomllib # For reading TOML config (Python 3.11+) - now in config_utils.py
@@ -27,7 +25,7 @@ import httpx # For new MCP tools
 from src.config_utils import (
     load_configuration as load_app_configuration, get_config_value,
     SUPPORTED_SET_PARAMS, MAX_FILES_TO_PROCESS_IN_DIR, MAX_FILE_SIZE_BYTES,
-    CONFIG_FROM_TOML, RUNTIME_OVERRIDES
+    RUNTIME_OVERRIDES
 )
 from src.file_utils import (
     normalize_path, is_binary_file, read_local_file as util_read_local_file, # Renamed read_local_file to util_read_local_file
@@ -878,7 +876,6 @@ def stream_llm_response(user_message: str):
 
         # Determine if we should print the "Reasoning:" header at all
         # For "silent", we don't print it. For "compact", we print it once. For "full", we print it once.
-        should_print_reasoning_header = reasoning_style in ["full", "compact"]
         reasoning_started_printed = False # Track if "💭 Reasoning:" has been printed
 
 

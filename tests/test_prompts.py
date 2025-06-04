@@ -1,5 +1,4 @@
 # tests/test_prompts.py
-import pytest
 from src.prompts import system_PROMPT
 
 def test_system_prompt_exists_and_is_string():

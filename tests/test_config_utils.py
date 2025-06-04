@@ -1,7 +1,6 @@
 # tests/test_config_utils.py
 import pytest
 import os
-from pathlib import Path
 import toml # For creating and parsing TOML content (tomllib for load, toml for dump)
 from unittest.mock import patch, MagicMock
 
