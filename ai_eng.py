@@ -937,12 +937,14 @@ def stream_llm_response(user_message: str):
         # Precedence: Env Var > config.toml > Hardcoded default
         default_model = "deepseek-reasoner"
         default_api_base = "https://api.deepseek.com/v1" # Ensure /v1 for DeepSeek
+        default_reasoning_style = "full"
 
         toml_litellm_config = CONFIG_FROM_TOML.get("litellm", {})
+        toml_ui_config = CONFIG_FROM_TOML.get("ui", {})
         
         model_name = os.getenv("LITELLM_MODEL") or toml_litellm_config.get("model") or default_model
         api_base_url = os.getenv("LITELLM_API_BASE") or toml_litellm_config.get("api_base") or default_api_base
-
+        reasoning_style = os.getenv("REASONING_STYLE") or toml_ui_config.get("reasoning_style") or default_reasoning_style
         # API key is expected to be set as an environment variable (e.g., DEEPSEEK_API_KEY)
 
         # API call using litellm
@@ -956,27 +958,50 @@ def stream_llm_response(user_message: str):
         )
 
         console.print("\n[bold bright_blue]🐋 Seeking...[/bold bright_blue]")
-        reasoning_started = False
-        reasoning_content = ""
+        reasoning_started_printed = False # Track if "💭 Reasoning:" has been printed
+        reasoning_content_accumulated = "" # To store full reasoning if needed later
         final_content = ""
         tool_calls = []
+        
+        # Determine if we should print the "Reasoning:" header at all
+        # For "silent", we don't print it. For "compact", we print it once. For "full", we print it once.
+        should_print_reasoning_header = reasoning_style in ["full", "compact"]
+
 
         for chunk in stream:
             # Handle reasoning content if available
             if hasattr(chunk.choices[0].delta, 'reasoning_content') and chunk.choices[0].delta.reasoning_content:
-                if not reasoning_started:
-                    console.print("\n[bold blue]💭 Reasoning:[/bold blue]")
-                    reasoning_started = True
-                console.print(chunk.choices[0].delta.reasoning_content, end="")
-                reasoning_content += chunk.choices[0].delta.reasoning_content
+                reasoning_chunk_content = chunk.choices[0].delta.reasoning_content
+                reasoning_content_accumulated += reasoning_chunk_content
+
+                if reasoning_style == "full":
+                    if not reasoning_started_printed:
+                        console.print("\n[bold blue]💭 Reasoning:[/bold blue]")
+                        reasoning_started_printed = True
+                    console.print(reasoning_chunk_content, end="")
+                elif reasoning_style == "compact":
+                    if not reasoning_started_printed:
+                        console.print("\n[bold blue]💭 Reasoning...[/bold blue]", end="") # Print header once
+                        reasoning_started_printed = True
+                    console.print(".", end="") # Print a dot for progress
+                # If style is "silent", do nothing here for reasoning_content
+
             elif chunk.choices[0].delta.content:
-                if reasoning_started:
-                    console.print("\n")  # Add spacing after reasoning
-                    console.print("\n[bold bright_blue]🤖 Assistant>[/bold bright_blue] ", end="")
-                    reasoning_started = False
+                if reasoning_started_printed and reasoning_style != "full": # Add newline if dots or compact header was printed
+                    console.print() # Newline after dots or compact header before assistant content
+                    reasoning_started_printed = False # Reset for next potential reasoning block in follow-up
+
+                if not final_content: # First content chunk
+                    console.print("\n\n[bold bright_blue]🤖 Assistant>[/bold bright_blue] ", end="")
+                
                 final_content += chunk.choices[0].delta.content
                 console.print(chunk.choices[0].delta.content, end="")
+
             elif chunk.choices[0].delta.tool_calls:
+                if reasoning_started_printed and reasoning_style != "full": # Newline if dots were printed
+                    console.print()
+                    reasoning_started_printed = False
+
                 # Handle tool calls
                 for tool_call_delta in chunk.choices[0].delta.tool_calls:
                     if tool_call_delta.index is not None:
@@ -996,13 +1021,21 @@ def stream_llm_response(user_message: str):
                             if tool_call_delta.function.arguments:
                                 tool_calls[tool_call_delta.index]["function"]["arguments"] += tool_call_delta.function.arguments
 
-        console.print()  # New line after streaming
+        if reasoning_started_printed and reasoning_style == "compact" and not final_content and not tool_calls:
+            # If only reasoning dots were printed and no content/tool_calls followed, add a newline.
+            console.print()
+
+        console.print()  # New line after streaming is complete
 
         # Store the assistant's response in conversation history
         assistant_message = {
             "role": "assistant",
-            "content": final_content if final_content else None
+            "content": final_content if final_content else None # Ensure None if empty
         }
+        # Add reasoning_content to the assistant message if it was captured (for full history, not for display)
+        # This is useful if we ever want to inspect the full reasoning later, regardless of display style.
+        if reasoning_content_accumulated:
+            assistant_message["reasoning_content_full"] = reasoning_content_accumulated # Store under a different key
         
         if tool_calls:
             # Convert our tool_calls format to the expected format
@@ -1023,7 +1056,7 @@ def stream_llm_response(user_message: str):
             
             if formatted_tool_calls:
                 # Important: When there are tool calls, content should be None or empty
-                if not final_content:
+                if not final_content: # If there was no regular content, set it to None
                     assistant_message["content"] = None
                     
                 assistant_message["tool_calls"] = formatted_tool_calls
@@ -1110,28 +1143,48 @@ def stream_llm_response(user_message: str):
                 )
                 
                 follow_up_content = ""
-                reasoning_started = False
-                
+                reasoning_started_printed_follow_up = False # Separate flag for follow-up reasoning
+                reasoning_content_accumulated_follow_up = ""
+
                 for chunk in follow_up_stream:
                     if hasattr(chunk.choices[0].delta, 'reasoning_content') and chunk.choices[0].delta.reasoning_content:
-                        if not reasoning_started:
-                            console.print("\n[bold blue]💭 Reasoning:[/bold blue]")
-                            reasoning_started = True
-                        console.print(chunk.choices[0].delta.reasoning_content, end="")
+                        reasoning_chunk_content_follow_up = chunk.choices[0].delta.reasoning_content
+                        reasoning_content_accumulated_follow_up += reasoning_chunk_content_follow_up
+                        if reasoning_style == "full":
+                            if not reasoning_started_printed_follow_up:
+                                console.print("\n[bold blue]💭 Reasoning:[/bold blue]")
+                                reasoning_started_printed_follow_up = True
+                            console.print(reasoning_chunk_content_follow_up, end="")
+                        elif reasoning_style == "compact":
+                            if not reasoning_started_printed_follow_up:
+                                console.print("\n[bold blue]💭 Reasoning...[/bold blue]", end="")
+                                reasoning_started_printed_follow_up = True
+                            console.print(".", end="")
+                        # If style is "silent", do nothing
+
                     elif chunk.choices[0].delta.content:
-                        if reasoning_started:
-                            console.print("\n")
-                            console.print("\n[bold bright_blue]🤖 Assistant>[/bold bright_blue] ", end="")
-                            reasoning_started = False
+                        if reasoning_started_printed_follow_up and reasoning_style != "full":
+                            console.print() # Newline after dots or compact header
+                            reasoning_started_printed_follow_up = False
+
+                        if not follow_up_content: # First content chunk of follow-up
+                             console.print("\n\n[bold bright_blue]🤖 Assistant>[/bold bright_blue] ", end="")
+                        
                         follow_up_content += chunk.choices[0].delta.content
                         console.print(chunk.choices[0].delta.content, end="")
                 
-                console.print()
+                if reasoning_started_printed_follow_up and reasoning_style == "compact" and not follow_up_content:
+                    console.print() # Newline if only dots were printed for follow-up reasoning
+
+                console.print() # Final newline for follow-up assistant message
                 
-                conversation_history.append({
+                assistant_follow_up_message = {
                     "role": "assistant",
                     "content": follow_up_content
-                })
+                }
+                if reasoning_content_accumulated_follow_up: # Store full reasoning for history
+                    assistant_follow_up_message["reasoning_content_full"] = reasoning_content_accumulated_follow_up
+                conversation_history.append(assistant_follow_up_message)
         else:
             # No tool calls, just store the regular response
             conversation_history.append(assistant_message)

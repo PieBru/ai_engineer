@@ -22,4 +22,4 @@ api_base = "https://api.deepseek.com/v1"
 #   "compact" - Shows "💭 Reasoning..." once, then prints dots for progress.
 #   "silent"  - Suppresses reasoning output entirely.
 # The REASONING_STYLE environment variable takes precedence over this setting.
-reasoning_style = "compact"
+reasoning_style = "full"
