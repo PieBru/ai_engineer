@@ -79,9 +79,11 @@ For when you want to preload files into conversation context:
 
 ### Prerequisites
 1. **DeepSeek R1+ API Key**: Get your API key from [DeepSeek Platform](https://platform.deepseek.com), or from OpenRouter, i.e. https://openrouter.ai/deepseek/deepseek-r1-0528:free (latest, as of 6/2025).
+   Set this key as `DEEPSEEK_API_KEY` in your `.env` file. For other models/providers, set the appropriate API key environment variable that LiteLLM expects (e.g., `OPENAI_API_KEY`).
 2. **Python 3.11+**: Required for optimal performance
 
 ### Installation
+
 
 1. **Clone the repository**:
    ```bash

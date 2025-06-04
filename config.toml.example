@@ -1,0 +1,16 @@
+# AI Engineer Configuration File
+# Non-sensitive settings can be defined here.
+# Sensitive settings like API keys should be in your .env file.
+
+[litellm]
+# The model name to use with LiteLLM.
+# Examples: "deepseek-reasoner", "gpt-4o", "claude-3-opus-20240229", "openrouter/deepseek/deepseek-chat"
+# If not set here or via environment variable, defaults to "deepseek-reasoner".
+# The LITELLM_MODEL environment variable (e.g., from .env or shell) takes precedence over this setting.
+model = "deepseek-reasoner"
+
+# The API base URL for LiteLLM.
+# Examples: "https://api.deepseek.com/v1", "https://api.openai.com/v1", "https://openrouter.ai/api/v1"
+# If not set here or via environment variable, defaults to "https://api.deepseek.com/v1".
+# The LITELLM_API_BASE environment variable (e.g., from .env or shell) takes precedence over this setting.
+api_base = "https://api.deepseek.com/v1"

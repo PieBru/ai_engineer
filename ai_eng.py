@@ -24,6 +24,7 @@ from prompt_toolkit.styles import Style as PromptStyle
 import time
 import copy # For deepcopy
 import httpx # For new MCP tools
+import tomllib # For reading TOML config (Python 3.11+)
 
 # Import litellm
 from litellm import completion
@@ -38,10 +39,38 @@ prompt_session = PromptSession(
     })
 )
 
+# Global dictionary to hold configurations loaded from config.toml
+CONFIG_FROM_TOML: Dict[str, Any] = {}
+
 # --------------------------------------------------------------------------------
 # 1. Configure LLM client settings and load environment variables
 # --------------------------------------------------------------------------------
-load_dotenv()  # Load environment variables from .env file
+
+def load_configuration():
+    """
+    Loads configuration with the following precedence:
+    1. Environment variables (highest)
+    2. .env file
+    3. config.toml file
+    4. Hardcoded defaults (lowest)
+    """
+    global CONFIG_FROM_TOML
+
+    # Load .env file into environment variables
+    load_dotenv()
+
+    # Load config.toml
+    config_file_path = Path("config.toml")
+    if config_file_path.exists():
+        try:
+            with open(config_file_path, "rb") as f:
+                CONFIG_FROM_TOML = tomllib.load(f)
+        except tomllib.TOMLDecodeError as e:
+            console.print(f"[yellow]Warning: Could not parse config.toml: {e}. Using defaults and environment variables.[/yellow]")
+        except Exception as e: # pylint: disable=broad-except
+            console.print(f"[yellow]Warning: Error loading config.toml: {e}. Using defaults and environment variables.[/yellow]")
+
+load_configuration() # Load configurations at startup
 
 # Define module-level constants for limits
 MAX_FILES_TO_PROCESS_IN_DIR = 1000
@@ -905,8 +934,16 @@ def stream_llm_response(user_message: str):
         messages_for_api_call = copy.deepcopy(conversation_history)
 
         # Get model and API base from environment variables, with defaults
-        model_name = os.getenv("LITELLM_MODEL", "deepseek-reasoner")
-        api_base_url = os.getenv("LITELLM_API_BASE", "https://api.deepseek.com")
+        # Precedence: Env Var > config.toml > Hardcoded default
+        default_model = "deepseek-reasoner"
+        default_api_base = "https://api.deepseek.com/v1" # Ensure /v1 for DeepSeek
+
+        toml_litellm_config = CONFIG_FROM_TOML.get("litellm", {})
+        
+        model_name = os.getenv("LITELLM_MODEL") or toml_litellm_config.get("model") or default_model
+        api_base_url = os.getenv("LITELLM_API_BASE") or toml_litellm_config.get("api_base") or default_api_base
+
+        # API key is expected to be set as an environment variable (e.g., DEEPSEEK_API_KEY)
 
         # API call using litellm
         stream = completion(
