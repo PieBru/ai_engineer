@@ -186,7 +186,15 @@ You> Now review this codebase structure
     *   `low`: Instructs the LLM for concise reasoning.
     *   `medium` (default): Standard reasoning detail.
     *   `high`: Instructs the LLM for highly detailed, step-by-step reasoning.
-*   These options can also be changed at runtime for the current session using the `/set` command (e.g., `/set model gpt-4o`).
+*   **Runtime Configuration (`/set` command)**: Many of these settings, along with others, can be adjusted during a session using the `/set <option_name> <value>` command. This allows for dynamic control over the AI's behavior. Available options for `/set` include:
+    *   `model`: Change the language model (e.g., `/set model gpt-4o`).
+    *   `api_base`: Update the API base URL (e.g., `/set api_base https://api.example.com/v1`).
+    *   `reasoning_style`: Adjust reasoning verbosity (`full`, `compact`, `silent`) (e.g., `/set reasoning_style compact`).
+    *   `max_tokens`: Set maximum response tokens (e.g., `/set max_tokens 2048`).
+    *   `reasoning_effort`: Control reasoning depth (`low`, `medium`, `high`) (e.g., `/set reasoning_effort high`).
+    *   `reply_effort`: Define the desired effort/detail in AI replies (e.g., `/set reply_effort high`).
+    *   `temperature`: Adjust model creativity/randomness, typically a float (e.g., `/set temperature 0.7`).
+
 
 ### **High-Level Architecture**
 The following diagram illustrates the main components and their interactions within AI Engineer:
