@@ -20,7 +20,9 @@ from rich.table import Table
 from rich.panel import Panel
 from prompt_toolkit import PromptSession
 from prompt_toolkit.styles import Style as PromptStyle
-import time
+import time # For tool call IDs
+import subprocess # For /shell command
+import markdown # For /help command
 import copy # For deepcopy
 import httpx # For new MCP tools
 # Removed: import tomllib # For reading TOML config (Python 3.11+) - now in config_utils.py
@@ -40,6 +42,7 @@ from src.prompts import system_PROMPT
 
 # Import litellm
 from litellm import completion
+from rich.markdown import Markdown as RichMarkdown # Import Rich's Markdown
 
 # Initialize Rich console and prompt session
 console = Console()
@@ -405,6 +408,257 @@ def try_handle_set_command(user_input: str) -> bool:
         console.print(f"[green]✓ Parameter '{param_name}' set to '{value}' for the current session.[/green]")
         return True
     return False
+
+def try_handle_help_command(user_input: str) -> bool:
+    """
+    Handles the /help command to display the help markdown file.
+    """
+    prefix = "/help"
+    if user_input.strip().lower() == prefix:
+        help_file_path = Path(__file__).parent / "ai_engineer_help.md"
+        try:
+            # Use imported util_read_local_file
+            help_content = util_read_local_file(str(help_file_path))
+            console.print(Panel(
+                RichMarkdown(help_content), # Use Rich's Markdown object
+                title="[bold blue]📚 AI Engineer Help[/bold blue]",
+                title_align="left",
+                border_style="blue"
+            ))
+        except FileNotFoundError:
+            console.print(f"[red]Error: Help file not found at '{help_file_path}'[/red]")
+        except OSError as e:
+            console.print(f"[red]Error reading help file: {e}[/red]")
+        # Help command does not add to conversation history
+        return True
+    return False
+
+def try_handle_shell_command(user_input: str) -> bool:
+    """
+    Handles the /shell command to execute a shell command and add output to history.
+    """
+    prefix = "/shell "
+    if user_input.strip().lower().startswith(prefix):
+        command_body = user_input[len(prefix):].strip()
+        if not command_body:
+            console.print("[yellow]Usage: /shell <command and arguments>[/yellow]")
+            console.print("[bold yellow]⚠️ Warning: Executing arbitrary shell commands can be risky.[/bold yellow]")
+            return True
+
+        console.print(f"[bold bright_blue]🐚 Executing shell command: '{command_body}'[/bold bright_blue]")
+        console.print("[dim]Output:[/dim]")
+
+        try:
+            # Execute the command
+            # Use shell=True for simplicity as requested, but note security risks
+            # capture_output=True captures stdout and stderr
+            # text=True decodes stdout/stderr as text
+            result = subprocess.run(command_body, shell=True, capture_output=True, text=True, check=False)
+
+            output = result.stdout.strip()
+            error_output = result.stderr.strip()
+            return_code = result.returncode
+
+            # Print output to console in real-time (or after execution for subprocess.run)
+            if output:
+                console.print(output)
+            if error_output:
+                console.print(f"[red]Stderr:[/red]\n{error_output}")
+            if return_code != 0:
+                 console.print(f"[red]Command exited with non-zero status code: {return_code}[/red]")
+
+            # Add output to conversation history
+            history_content = f"Shell command executed: '{command_body}'\n\n"
+            if output:
+                history_content += f"Stdout:\n```\n{output}\n```\n"
+            if error_output:
+                 history_content += f"Stderr:\n```\n{error_output}\n```\n"
+            if return_code != 0:
+                 history_content += f"Return Code: {return_code}\n"
+
+            conversation_history.append({
+                "role": "system",
+                "content": history_content.strip()
+            })
+            console.print("[bold blue]✓[/bold blue] Shell output added to conversation history.\n")
+
+        except FileNotFoundError:
+            # This happens if shell=False and the command itself is not found
+             console.print(f"[red]Error: Command not found: '{command_body.split()[0]}'[/red]")
+             conversation_history.append({
+                "role": "system",
+                "content": f"Error: Shell command not found: '{command_body.split()[0]}'"
+            })
+        except Exception as e:
+            console.print(f"[red]An error occurred during shell execution: {e}[/red]")
+            conversation_history.append({
+                "role": "system",
+                "content": f"Error executing shell command '{command_body}': {e}"
+            })
+
+        return True
+    return False
+
+def try_handle_context_command(user_input: str) -> bool:
+    """
+    Handles /context commands (save, load, list, summarize).
+    """
+    prefix = "/context "
+    if user_input.strip().lower().startswith(prefix):
+        command_body = user_input[len(prefix):].strip()
+        parts = command_body.split(maxsplit=1)
+        sub_command = parts[0].lower() if parts else ""
+        arg = parts[1] if len(parts) > 1 else ""
+
+        if sub_command == "save":
+            if not arg:
+                console.print("[yellow]Usage: /context save <name>[/yellow]")
+                return True
+            save_context(arg)
+            return True
+
+        elif sub_command == "load":
+            if not arg:
+                console.print("[yellow]Usage: /context load <name>[/yellow]")
+                return True
+            load_context(arg)
+            return True
+
+        elif sub_command == "list":
+            list_contexts(arg if arg else ".") # List in current dir if no path given
+            return True
+
+        elif sub_command == "summarize":
+            summarize_context()
+            return True
+
+        else:
+            console.print("[yellow]Usage: /context <save|load|list|summarize> [name/path][/yellow]")
+            console.print("[yellow]  save <name>     - Save current context to a file.[/yellow]")
+            console.print("[yellow]  load <name>     - Load context from a file.[/yellow]")
+            console.print("[yellow]  list [path]     - List saved contexts in a directory.[/yellow]")
+            console.print("[yellow]  summarize       - Summarize current context using the LLM.[/yellow]")
+            return True
+    return False
+
+def save_context(name: str):
+    """Saves the current conversation history to a JSON file."""
+    file_name = f"context_{name}.json"
+    try:
+        with open(file_name, "w", encoding="utf-8") as f:
+            json.dump(conversation_history, f, indent=2)
+        console.print(f"[bold blue]✓[/bold blue] Context saved to '[bright_cyan]{file_name}[/bright_cyan]'\n")
+    except Exception as e:
+        console.print(f"[bold red]✗[/bold red] Failed to save context to '{file_name}': {e}\n")
+
+def load_context(name: str):
+    """Loads conversation history from a JSON file."""
+    file_name = f"context_{name}.json"
+    try:
+        with open(file_name, "r", encoding="utf-8") as f:
+            loaded_history = json.load(f)
+
+        # Validate loaded history structure (basic check)
+        if not isinstance(loaded_history, list) or not all(isinstance(msg, dict) and "role" in msg for msg in loaded_history):
+             raise ValueError("Invalid context file format.")
+
+        # Keep the initial system prompt, replace the rest
+        global conversation_history
+        initial_system_prompt = conversation_history[0] if conversation_history and conversation_history[0]["role"] == "system" else {"role": "system", "content": system_PROMPT}
+        conversation_history = [initial_system_prompt] + [msg for msg in loaded_history if msg["role"] != "system"]
+
+        console.print(f"[bold blue]✓[/bold blue] Context loaded from '[bright_cyan]{file_name}[/bright_cyan]'\n")
+    except FileNotFoundError:
+        console.print(f"[bold red]✗[/bold red] Context file not found: '[bright_cyan]{file_name}[/bright_cyan]'\n")
+    except json.JSONDecodeError:
+        console.print(f"[bold red]✗[/bold red] Failed to parse JSON from context file: '[bright_cyan]{file_name}[/bright_cyan]'. File might be corrupted.\n")
+    except ValueError as e:
+         console.print(f"[bold red]✗[/bold red] Invalid context file format for '[bright_cyan]{file_name}[/bright_cyan]': {e}\n")
+    except Exception as e:
+        console.print(f"[bold red]✗[/bold red] Failed to load context from '{file_name}': {e}\n")
+
+def list_contexts(path: str):
+    """Lists potential context files in the specified directory."""
+    try:
+        # Use imported normalize_path
+        normalized_path_str = normalize_path(path)
+        target_dir = Path(normalized_path_str)
+
+        if not target_dir.is_dir():
+            console.print(f"[bold red]✗[/bold red] Path is not a directory: '[bright_cyan]{path}[/bright_cyan]'\n")
+            return
+
+        console.print(f"[bold bright_blue]📚 Saved Contexts in '[bright_cyan]{target_dir}[/bright_cyan]':[/bold bright_blue]")
+        found_files = list(target_dir.glob("context_*.json"))
+
+        if not found_files:
+            console.print("  [dim]No context files found.[/dim]\n")
+            return
+
+        for f in found_files:
+            console.print(f"  [bright_cyan]{f.name}[/bright_cyan]")
+        console.print() # Final newline
+
+    except ValueError as e: # From normalize_path
+        console.print(f"[bold red]✗[/bold red] Invalid path '[bright_cyan]{path}[/bright_cyan]': {e}\n")
+    except Exception as e:
+        console.print(f"[bold red]✗[/bold red] Failed to list contexts in '{path}': {e}\n")
+
+def summarize_context():
+    """Summarizes the current conversation history using the LLM and replaces the history."""
+    global conversation_history
+
+    if len(conversation_history) <= 1: # Only system prompt
+        console.print("[yellow]No conversation history to summarize.[/yellow]\n")
+        return
+
+    console.print("[bold bright_blue]✨ Summarizing conversation history...[/bold bright_blue]")
+
+    # Create a temporary history for the summary request
+    # Keep the original system prompt, add a user message asking for summary
+    summary_messages = [
+        conversation_history[0], # Original system prompt
+        {"role": "user", "content": "Please provide a concise summary of our conversation so far. Focus on the key topics discussed, decisions made, and actions taken (like file operations). This summary will replace the detailed history."}
+    ]
+
+    # Add the rest of the history for the LLM to read
+    summary_messages.extend(conversation_history[1:])
+
+    try:
+        # Use imported get_config_value for model/api_base
+        model_name = get_config_value("model", "gpt-4o") # Use a capable model for summary
+        api_base_url = get_config_value("api_base", None)
+
+        # Call LLM for summary (non-streaming for simplicity here)
+        # Use a lower temperature for a more focused summary
+        response = completion(
+            model=model_name,
+            messages=summary_messages,
+            temperature=0.3,
+            max_tokens=1024, # Limit summary length
+            api_base=api_base_url,
+            stream=False # Don't stream the summary response
+        )
+
+        summary_content = response.choices[0].message.content
+
+        if summary_content:
+            console.print("\n[bold blue]Summary:[/bold blue]")
+            console.print(Panel(summary_content, border_style="blue"))
+
+            # Replace history with system prompt + summary
+            initial_system_prompt = conversation_history[0] if conversation_history and conversation_history[0]["role"] == "system" else {"role": "system", "content": system_PROMPT}
+            conversation_history = [
+                initial_system_prompt,
+                {"role": "system", "content": f"Conversation Summary:\n\n{summary_content}"}
+            ]
+            console.print("[bold blue]✓[/bold blue] Conversation history replaced with summary.\n")
+        else:
+            console.print("[yellow]LLM returned an empty summary.[/yellow]\n")
+
+    except Exception as e:
+        console.print(f"[bold red]✗[/bold red] Failed to summarize context: {e}\n")
+        # History remains unchanged on error
 
 
 def add_directory_to_conversation(directory_path: str):
@@ -1050,16 +1304,24 @@ def stream_llm_response(user_message: str):
 def main():
     # The welcome panel has been removed for a cleaner CLI startup.
     # Create an elegant instruction panel
-    instructions = """[bold bright_blue]📁 File Operations:[/bold bright_blue]
-  • [bright_cyan]/add path/to/file[/bright_cyan] - Include a single file in the conversation context.
-  • [bright_cyan]/add path/to/folder[/bright_cyan] - Include all files in a folder.
-  • [dim]The AI can automatically read and create files using function calls, and can use MCP servers.[/dim]
+#    instructions = """[bold bright_blue]📁 File Operations:[/bold bright_blue]
+#  • [bright_cyan]/add path/to/file_or_folder[/bright_cyan] - Add file/folder to context.
+#  • [dim]The AI can automatically read and create files using function calls, and can use MCP servers.[/dim]
+#
+#[bold bright_blue]🎯 Commands:[/bold bright_blue]
+#  • [bright_cyan]exit[/bright_cyan] or [bright_cyan]quit[/bright_cyan] - End the session
+#  • [bright_cyan]/set <parameter> <value>[/bright_cyan] - Change configuration for the current session.
+#    Example: [dim]/set reasoning_style compact[/dim]
+#    Available: [dim]model, api_base, reasoning_style, max_tokens, reasoning_effort, reply_effort, temperature[/dim]
+#  • [bright_cyan]/help[/bright_cyan] - Display detailed help information.
+#  • [bright_cyan]/shell [command][/bright_cyan] - Execute a shell command and add output to history.
+#  • [bright_cyan]/context save <name>[/bright_cyan] - Save current conversation context.
+#  • [bright_cyan]/context load <name>[/bright_cyan] - Load a saved conversation context.
+#  • [bright_cyan]/context list [path][/bright_cyan] - List saved contexts.
+#  • [bright_cyan]/context summarize[/bright_cyan] - Summarize current context using the LLM.
+#  • [bold white]Just ask naturally - the AI will handle file operations automatically![/bold white]"""
 
-[bold bright_blue]🎯 Commands:[/bold bright_blue]
-  • [bright_cyan]exit[/bright_cyan] or [bright_cyan]quit[/bright_cyan] - End the session
-  • [bright_cyan]/set <parameter> <value>[/bright_cyan] - Change configuration for the current session.
-    Example: [dim]/set reasoning_style compact[/dim]
-    Available: [dim]model, api_base, reasoning_style, max_tokens, reasoning_effort, reply_effort, temperature[/dim]
+    instructions = """  • [bright_cyan]/help[/bright_cyan] - Display detailed help information.
   • [bold white]Just ask naturally - the AI will handle file operations automatically![/bold white]"""
 
 
@@ -1092,6 +1354,18 @@ def main():
 
         # Use imported try_handle_set_command
         if try_handle_set_command(user_input):
+            continue
+
+        # Use the new try_handle_help_command
+        if try_handle_help_command(user_input):
+            continue
+
+        # Use the new try_handle_shell_command
+        if try_handle_shell_command(user_input):
+            continue
+
+        # Use the new try_handle_context_command
+        if try_handle_context_command(user_input):
             continue
 
         # Use imported stream_llm_response
