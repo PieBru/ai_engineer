@@ -1,0 +1,28 @@
+[project]
+name = "ai-engineer"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "litellm",
+    "prompt-toolkit>=3.0.50",
+    "pydantic>=2.10.4",
+    "python-dotenv>=1.0.1",
+    "rich>=13.9.4",
+]
+
+[project.optional-dependencies] # Dependencies required for development and testing
+test = [
+    "pytest>=8.4.0", # As seen in your pytest output
+    "pytest-cov>=5.0.0", # Add pytest-cov for coverage integration
+]
+
+[tool.pytest.ini_options]
+addopts = "--cov=ai_eng --cov-report=term-missing" # Configure pytest-cov to measure coverage for the ai_eng module and report missing lines
+filterwarnings = [
+    "ignore:Support for class-based `config` is deprecated, use ConfigDict instead:pydantic.PydanticDeprecatedSince20",
+]
+
+[tool.coverage.report]
+fail_under = 50
