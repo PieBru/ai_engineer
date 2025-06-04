@@ -87,7 +87,14 @@ SUPPORTED_SET_PARAMS = {
         "default_value_key": "default_reply_effort", # Key for default in stream_llm_response
         "allowed_values": ["low", "medium", "high"],
         "description": "Controls the verbosity of the AI's final reply: 'low' (synthetic, concise summary), 'medium' (standard detail, default), 'high' (detailed and comprehensive report/explanation)."
-    }
+        },
+    "temperature": {
+        "env_var": "LITELLM_TEMPERATURE",
+        "toml_section": "litellm",
+        "toml_key": "temperature",
+        "default_value_key": "default_temperature", # Key for default in stream_llm_response
+        "description": "Controls the randomness/creativity of the response (0.0 to 2.0, lower is more deterministic)."
+}
 }
 
 
@@ -736,6 +743,14 @@ def try_handle_set_command(user_input: str) -> bool:
             except ValueError:
                 console.print(f"[red]Error: Invalid value '{value}' for 'max_tokens'. Must be a positive integer.[/red]")
                 return True
+        elif param_name == "temperature":
+            try:
+                float_value = float(value)
+                if not (0.0 <= float_value <= 2.0): # Temperature is typically between 0.0 and 2.0
+                    raise ValueError("Temperature must be a float between 0.0 and 2.0.")
+            except ValueError as e:
+                console.print(f"[red]Error: Invalid value '{value}' for 'temperature'. Must be a float between 0.0 and 2.0. Details: {e}[/red]")
+                return True
 
         RUNTIME_OVERRIDES[param_name] = value
         console.print(f"[green]✓ Parameter '{param_name}' set to '{value}' for the current session.[/green]")
@@ -1062,6 +1077,7 @@ def stream_llm_response(user_message: str):
         default_max_tokens_val = 8192
         default_reasoning_effort_val = "medium"
         default_reply_effort_val = "medium"
+        default_temperature_val = 0.7 # Common default for temperature
 
         toml_config_sections = {
             "litellm": CONFIG_FROM_TOML.get("litellm", {}),
@@ -1073,8 +1089,10 @@ def stream_llm_response(user_message: str):
             runtime_val = RUNTIME_OVERRIDES.get(param_name)
             if runtime_val is not None:
                 # For boolean-like or numeric, ensure correct type if string from runtime
-                if p_config.get("allowed_values") and isinstance(runtime_val, str):
-                    return runtime_val # Keep as string for .lower() later if needed
+                # Attempt conversion based on expected type, default to string if conversion fails/not needed
+                if param_name == "max_tokens": return int(runtime_val) if isinstance(runtime_val, str) and runtime_val.isdigit() else runtime_val
+                if param_name == "temperature": return float(runtime_val) if isinstance(runtime_val, str) else runtime_val
+                # For others (like strings or allowed values), return as is
                 # Add more type conversions if necessary, e.g., for max_tokens
                 return runtime_val
             
@@ -1102,6 +1120,14 @@ def stream_llm_response(user_message: str):
                 max_tokens = default_max_tokens_val
         except (ValueError, TypeError):
             max_tokens = default_max_tokens_val
+            
+        temperature_raw = get_config_value("temperature", default_temperature_val)
+        try:
+            temperature = float(temperature_raw)
+            # Optional: Add range validation here if desired, e.g., if not (0.0 <= temperature <= 2.0): ...
+        except (ValueError, TypeError):
+            console.print(f"[yellow]Warning: Invalid temperature value '{temperature_raw}'. Using default {default_temperature_val}.[/yellow]")
+            temperature = default_temperature_val
 
         reasoning_effort_setting = str(get_config_value("reasoning_effort", default_reasoning_effort_val)).lower()
         reply_effort_setting = str(get_config_value("reply_effort", default_reply_effort_val)).lower()
@@ -1140,6 +1166,7 @@ def stream_llm_response(user_message: str):
             tools=tools,
             max_tokens=max_tokens, # Pass the determined max_tokens
             api_base=api_base_url,           # Explicitly pass for this call
+            temperature=temperature, # Pass the determined temperature
             stream=True
         )
 
@@ -1386,7 +1413,7 @@ def main():
   • [bright_cyan]exit[/bright_cyan] or [bright_cyan]quit[/bright_cyan] - End the session
   • [bright_cyan]/set <parameter> <value>[/bright_cyan] - Change configuration for the current session.
     Example: [dim]/set reasoning_style compact[/dim]
-    Available: [dim]model, api_base, reasoning_style, max_tokens, reasoning_effort, reply_effort[/dim]
+    Available: [dim]model, api_base, reasoning_style, max_tokens, reasoning_effort, reply_effort, temperature[/dim]
   • [bold white]Just ask naturally - the AI will handle file operations automatically![/bold white]"""
 
     
