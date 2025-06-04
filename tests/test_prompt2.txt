@@ -1,0 +1,29 @@
+Generate a single HTML file that creates a "Solar Cube" visualization. The primary goal is to display a 3D cube that rotates continuously, and within this cube, a 2D animated representation of a simplified solar system (a central sun and a few orbiting planets) should be visible and appear to rotate along with the cube.
+
+Core Requirements:
+
+Single File Output: All HTML, CSS (embedded in <style> tags), and any necessary JavaScript (embedded in <script> tags, preferably at the end of the body) must be contained within this single HTML file.
+
+3D Scene & Rotating Cube:
+
+Establish a 3D perspective for the scene.
+The main element is a 3D cube that continuously and smoothly rotates in 3D space (e.g., around its X and Y axes).
+The cube's faces should be visually distinct (e.g., using semi-transparent backgrounds, borders) and could optionally display simple labels.
+Ensure transform-style: preserve-3d is used appropriately for the cube and its container.
+Embedded 2D Solar System:
+
+Inside the 3D cube, render a 2D representation of a simplified solar system. This solar system model must be a child of the cube in the DOM so that it rotates along with the cube.
+Sun: A centrally located, visually distinct sun (e.g., with a glowing effect).
+Planets: Several planets (e.g., 3-4) of varying sizes and appearances, each orbiting the sun.
+Orbital Animation: Each planet should animate in a circular orbit around the sun at a unique speed and orbital distance.
+Visual Orbits (Optional): Consider adding visual cues for the planets' orbital paths (e.g., faint circular lines).
+Styling & Layout:
+
+The overall page background should be dark (e.g., black) to simulate space.
+The entire 3D scene (containing the cube) should be centered on the page, both horizontally and vertically.
+The page should not have scrollbars.
+Technology Constraints:
+
+Use only HTML, CSS, and JavaScript.
+Prioritize CSS for animations where possible. JavaScript should be minimal and used only if necessary for complex animation setups or interactions not easily achievable with CSS alone.
+Objective: The final output should be a visually engaging animation where a self-contained solar system appears to be housed within a perpetually rotating 3D cube.

@@ -1,0 +1,18 @@
+Generate a single HTML file for a "HexaBounce" animation.
+
+Core Task: Create a 2D physics simulation where a ball bounces realistically inside a continuously rotating hexagon.
+
+Key Elements:
+
+Rendering: Use HTML5 Canvas.
+Visuals:
+Hexagon: Rotating, outlined.
+Ball: Circular, styled, bounces off hexagon walls.
+Scene: Centered, appealing background.
+Physics & Animation (JavaScript):
+Realistic ball movement (gravity, friction/damping).
+Accurate collision detection with rotating hexagon sides.
+Smooth animation loop (requestAnimationFrame).
+User Controls (HTML & JS):
+Sliders to adjust gravity, friction, and hexagon rotation speed in real-time.
+Output: Single HTML file containing all HTML, CSS, and JavaScript.

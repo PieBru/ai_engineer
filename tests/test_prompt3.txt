@@ -1,0 +1,70 @@
+Please generate a single HTML file named solar_cube.html that creates a visual "Solar Cube". This file should contain all necessary HTML, CSS (within <style> tags), and JavaScript (if needed, within <script> tags at the end of the body).
+
+The main feature is a 3D cube that continuously rotates. Inside this cube, a 2D representation of a simplified solar system (Sun and a few planets) should be visible and animated.
+
+Here are the detailed requirements:
+
+1. Overall Page Setup:
+
+The <body> should have a black background (#000).
+All content should be centered horizontally and vertically on the page.
+Apply a perspective of around 1200px to the body or a main scene container to enable the 3D effect.
+Ensure overflow: hidden; on the body to prevent scrollbars.
+2. Scene and 3D Cube (.scene and .cube):
+
+Create a .scene div (e.g., 300px width and height) to act as the 3D space container.
+Inside the .scene, create a .cube div that will hold the faces and the solar system. This .cube should also be 300px by 300px.
+Both .scene and .cube must have transform-style: preserve-3d;.
+Animate the .scene or .cube to rotate continuously and smoothly, for example, a 360-degree rotation around both X and Y axes over 30 seconds, infinitely. Name this animation rotateCube.
+3. Cube Faces (.face):
+
+The cube should have 6 faces (.face class).
+Each face should be 300px by 300px.
+Style the faces with:
+A thin, light-colored border (e.g., 2px solid rgba(255, 255, 255, 0.2)).
+box-sizing: border-box;.
+position: absolute;.
+Semi-transparent background colors to distinguish them (e.g., rgba(255, 0, 0, 0.1) for front, rgba(0, 255, 0, 0.1) for back, etc.).
+Text labels (e.g., "Front", "Back", "Top", "Left", "Right", "Bottom") centered on each face, with a light color and a readable font size (e.g., 24px).
+Opacity around 0.7.
+Position each face correctly using transform properties:
+.front: translateZ(150px)
+.back: rotateY(180deg) translateZ(150px)
+.right: rotateY(90deg) translateZ(150px)
+.left: rotateY(-90deg) translateZ(150px)
+.top: rotateX(90deg) translateZ(150px)
+.bottom: rotateX(-90deg) translateZ(150px)
+4. Solar System (Inside the Cube):
+
+Create a div with class .solar-system inside the .cube div. This ensures it rotates with the cube.
+Position this .solar-system div so it appears centered within the cube's 3D space (e.g., using absolute positioning and transform: translate(-50%, -50%) if its parent is the cube).
+The solar system model itself will be 2D.
+4.1. Sun (.sun): - Position: Centered within the .solar-system container. - Size: Approximately 40px width and height. - Appearance: - border-radius: 50%; - Background: A radial gradient from yellow to orange (e.g., radial-gradient(circle, #ffd700, #ff8c00)). - box-shadow to give a glowing effect (e.g., 0 0 20px #ff8c00).
+
+4.2. Planets (.planet): - Create at least 3-4 planets (e.g., Mercury, Venus, Earth, Mars). - Each planet should have a common class .planet and a specific class for its name (e.g., .mercury, .earth). - Appearance: - border-radius: 50%; - position: absolute; (relative to the .solar-system container). - Mercury: Small (e.g., 8px), grey color (e.g., #a9a9a9). - Venus: Medium (e.g., 12px), orange/yellow color (e.g., #ffa500). - Earth: Medium (e.g., 12px), blue color (e.g., #1e90ff). - Mars: Slightly smaller than Earth (e.g., 10px), red color (e.g., #ff4500). - Orbital Animation: - Each planet should animate in an orbit around the sun. - Create a CSS animation named orbitPlanet. - The animation should make the planet revolve around the sun's center. This can be achieved by transforming the planet's translateX (for orbital radius) and rotate (for position along the orbit) properties. - Each planet needs a different orbital radius and animation duration: - Mercury: Smallest orbit (e.g., translateX(50px) in animation), fastest (e.g., 4 seconds). - Venus: Medium orbit (e.g., translateX(70px) in animation), medium speed (e.g., 8 seconds). - Earth: Larger orbit (e.g., translateX(90px) in animation), slower (e.g., 12 seconds). - Mars: Largest orbit (e.g., translateX(110px) in animation), slowest (e.g., 20 seconds). - The transform-origin for planets should be set appropriately to achieve orbit around the sun's center (e.g., if planets are positioned relative to the sun, their transform-origin might be relative to the sun's center). A common technique is to offset the planet from its orbital center and then rotate its container. - Consider using a structure where each planet div is a child of the .solar-system and its animation directly controls its orbit.
+
+4.3. Visual Orbits (.orbit): - For each planet, draw a faint circular orbit path. - These can be div elements with class .orbit. - Style: - position: absolute; centered with the sun. - border: 1px solid rgba(255, 255, 255, 0.1); - border-radius: 50%; - No background. - Each orbit div should have a width and height corresponding to its planet's orbital diameter (e.g., Mercury's orbit div: 100px width/height; Venus: 140px; Earth: 180px; Mars: 220px).
+
+5. CSS Animations (@keyframes):
+
+Define @keyframes rotateCube for the cube's 3D rotation.
+Define @keyframes orbitPlanet (or similar) for the planets' orbital motion. This keyframe should primarily handle the rotation around the central point. The translateX for the orbital radius should be applied per planet, either through different classes modifying the animation or by having slightly different keyframes if necessary. For example: '''css /* Example for a generic orbit, actual translateX might need to be set per planet / @keyframes orbitPlanet { 0% { transform: rotate(0deg) translateX(VAR_ORBIT_RADIUS) rotate(0deg); } / VAR_ORBIT_RADIUS to be set per planet / 100% { transform: rotate(360deg) translateX(VAR_ORBIT_RADIUS) rotate(-360deg); } / Second rotate keeps planet from spinning wildly on its own axis */ } ''' You might need to apply the translateX outside the keyframes if you use one generic keyframe, or create specific keyframes for each planet if that's simpler.
+6. JavaScript (Optional):
+
+If the animations can be achieved purely with CSS (which is preferred for this task), then no JavaScript is strictly necessary for the animation logic.
+If JavaScript is used, it should be minimal and primarily for any dynamic setup or complex interactions not easily achievable with CSS.
+7. Code Structure and Quality:
+
+All HTML, CSS, and JavaScript should be in a single index.html file.
+HTML should be well-structured and semantic where appropriate.
+CSS should be clean, well-commented, and organized.
+Ensure class names are descriptive.
+Please generate the complete HTML content based on these specifications. '''
+
+This prompt aims to be comprehensive, covering:
+
+The overall structure and appearance.
+Specifics for the 3D cube and its faces.
+Details for the sun, planets (colors, relative sizes), and their orbits.
+Animation requirements for both the cube and the planets, including hints on how to achieve different orbital radii.
+Emphasis on a single HTML file with embedded CSS.
