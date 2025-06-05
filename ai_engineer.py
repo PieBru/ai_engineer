@@ -506,8 +506,8 @@ def summarize_context():
     summary_messages.extend(conversation_history[1:])
 
     try:
-        # Use imported get_config_value for model/api_base
-        model_name = get_config_value("model", "gpt-4o") # Use a capable model for summary
+
+        model_name = get_config_value("model", "gpt-4o")
         api_base_url = get_config_value("api_base", None)
 
         # Call LLM for summary (non-streaming for simplicity here)
@@ -615,27 +615,25 @@ def add_directory_to_conversation(directory_path: str): # Keep this function
                 try:
                     # Check file size before processing
                     if os.path.getsize(full_path) > MAX_FILE_SIZE_BYTES:
-                        skipped_files.append(f"{full_path} (exceeds size limit)")
-                        continue
-                    if is_binary_file(full_path):
-                        skipped_files.append(full_path)
-                        continue
+                    skipped_files.append(f"{full_path} (exceeds size limit)")
+                    continue
+                if is_binary_file(full_path):
+                    skipped_files.append(full_path)
+                    continue
 
-                    # Use imported normalize_path
-                    normalized_path = normalize_path(full_path)
-                    # Use imported util_read_local_file
-                    content = util_read_local_file(normalized_path)
-                    conversation_history.append({
-                        "role": "system",
-                        "content": f"Content of file '{normalized_path}':\n\n{content}"
-                    })
-                    added_files.append(normalized_path)
-                    total_files_processed += 1
+                normalized_path = normalize_path(full_path)
+                content = util_read_local_file(normalized_path)
+                conversation_history.append({
+                    "role": "system",
+                    "content": f"Content of file '{normalized_path}':\n\n{content}"
+                })
+                added_files.append(normalized_path)
+                total_files_processed += 1
 
-                except OSError: # Catch read errors
-                    skipped_files.append(str(full_path)) # Ensure it's a string
-                except ValueError as e: # Catch errors from normalize_path # This line is missing in coverage
-                     skipped_files.append(f"{full_path} (Invalid path: {e})")
+            except OSError:
+                skipped_files.append(str(full_path))
+            except ValueError as e:
+                 skipped_files.append(f"{full_path} (Invalid path: {e})")
 
 
         console.print(f"[bold blue]✓[/bold blue] Added folder '[bright_cyan]{directory_path}[/bright_cyan]' to conversation.")
@@ -793,10 +791,9 @@ def execute_function_call_dict(tool_call_dict) -> str:
             return f"Unknown function: {function_name}"
 
     except Exception as e:
-        # This block handles errors from json.loads or any of the specific tool functions # This line is missing in coverage
         error_message = f"Error executing {function_name}: {str(e)}"
-        console.print(f"[red]{error_message}[/red]") # Print the error to console
-        return error_message # Return the error message string
+        console.print(f"[red]{error_message}[/red]")
+        return error_message
 
 
 def trim_conversation_history():
@@ -840,7 +837,7 @@ def stream_llm_response(user_message: str):
         # It already uses CONFIG_FROM_TOML, RUNTIME_OVERRIDES, SUPPORTED_SET_PARAMS which are imported globals.
         # Use imported constants for defaults where applicable
         model_name = get_config_value("model", "gpt-4o") # Use a reasonable default if not configured
-        api_base_url = get_config_value("api_base", None) # Let litellm handle default if not configured
+        api_base_url = get_config_value("api_base", None)
         reasoning_style = str(get_config_value("reasoning_style", "full")).lower()
 
         max_tokens_raw = get_config_value("max_tokens", default_max_tokens_val)
@@ -1144,7 +1141,7 @@ def stream_llm_response(user_message: str):
         return {"success": True}
 
     except Exception as e:
-        error_msg = f"LLM API error: {str(e)}" # This line is missing in coverage
+        error_msg = f"LLM API error: {str(e)}"
         console.print(f"\n[bold red]❌ {error_msg}[/bold red]")
         return {"error": error_msg}
 

@@ -1,15 +1,15 @@
-# /run/media/piero/NVMe-4TB/Piero/AI/AI-Engineer/config_utils.py
+
 import os
 from pathlib import Path
 import tomllib # For reading TOML config (Python 3.11+)
 from typing import Dict, Any
 from dotenv import load_dotenv
 
-# Global dictionary to hold configurations loaded from config.toml
+
 CONFIG_FROM_TOML: Dict[str, Any] = {}
 RUNTIME_OVERRIDES: Dict[str, Any] = {}
 
-# Define module-level constants for limits
+
 MAX_FILES_TO_PROCESS_IN_DIR = 1000
 MAX_FILE_SIZE_BYTES = 5_000_000  # 5MB
 
@@ -80,10 +80,10 @@ def load_configuration(console_obj):
     """
     global CONFIG_FROM_TOML
 
-    # Load .env file into environment variables
+
     load_dotenv()
 
-    # Load config.toml
+
     config_file_path = Path("config.toml")
     if config_file_path.exists():
         try:
@@ -111,15 +111,14 @@ def get_config_value(param_name: str, default_value: Any, console_obj=None) -> A
     
     env_val = os.getenv(p_config["env_var"])
     if env_val is not None:
-        # Convert env var string to appropriate type if necessary
+
         if param_name == "max_tokens": return int(env_val) if env_val.isdigit() else default_value
         if param_name == "temperature":
             try: return float(env_val)
             except ValueError: return default_value
-        # For reasoning_style, reasoning_effort, reply_effort, env_val is fine as string if it matches allowed_values
         if "allowed_values" in p_config and env_val.lower() in p_config["allowed_values"]:
             return env_val.lower()
-        elif "allowed_values" not in p_config: # For model, api_base
+        elif "allowed_values" not in p_config:
              return env_val
         # If env_val is set but not allowed for style/effort, it will fall through to TOML/default
         # This could be logged as a warning if desired.

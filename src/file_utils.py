@@ -1,9 +1,8 @@
-# /run/media/piero/NVMe-4TB/Piero/AI/AI-Engineer/file_utils.py
+
 from pathlib import Path
 from rich.panel import Panel # For apply_diff_edit
 
-# MAX_FILE_SIZE_BYTES will be imported from config_utils by the calling code
-# and passed to functions like create_file.
+
 
 def normalize_path(path_str: str) -> str:
     """Return a canonical, absolute version of the path with security checks."""
@@ -43,9 +42,7 @@ def read_local_file(file_path: str) -> str:
     """Return the text content of a local file.
     Raises FileNotFoundError or OSError on issues.
     """
-    # Normalization should be done by the caller if needed before passing here,
-    # or this function could call normalize_path itself.
-    # For this refactor, assuming caller (e.g., execute_function_call_dict) handles normalization.
+
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             return f.read()
@@ -60,12 +57,7 @@ def create_file(path: str, content: str, console_obj, max_file_size_bytes: int):
         raise ValueError("Home directory references not allowed for create_file directly; normalize path first.")
 
     try:
-        # Assuming path is already normalized by the caller if it came from user input.
-        # If this function is called internally with potentially non-normalized paths,
-        # normalization should happen here or be guaranteed by the caller.
-        # For simplicity in this refactor, we'll assume `path` is ready to be used or
-        # `normalize_path` has been called by the orchestrating function.
-        # Let's add normalization here for safety if called directly.
+
         normalized_file_path_str = normalize_path(path)
     except ValueError as e:
         console_obj.print(f"[bold red]✗[/bold red] Could not create file. Invalid path: '[bright_cyan]{path}[/bright_cyan]'. Error: {e}")
