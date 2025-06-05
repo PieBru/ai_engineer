@@ -1,4 +1,4 @@
-
+# /run/media/piero/NVMe-4TB/Piero/AI/AI-Engineer/tool_defs.py
 RISKY_TOOLS = {"create_file", "create_multiple_files", "edit_file", "connect_remote_mcp_sse"}
 
 tools = [

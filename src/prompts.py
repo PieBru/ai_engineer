@@ -1,4 +1,4 @@
-
+# /run/media/piero/NVMe-4TB/Piero/AI/AI-Engineer/prompts.py
 from textwrap import dedent
 
 system_PROMPT = dedent("""\
