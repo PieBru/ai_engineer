@@ -14,6 +14,7 @@ import sys # Keep sys for exit
 from pydantic import BaseModel, ConfigDict
 from rich.console import Console
 from rich.panel import Panel
+from rich.table import Table # For risky tool confirmation
 from prompt_toolkit import PromptSession
 import time # For tool call IDs
 import subprocess # For /shell command
@@ -370,13 +371,20 @@ def try_handle_shell_command(user_input: str) -> bool:
         return True
     return False
 
-def try_handle_context_command(user_input: str) -> bool: # Keep this function
+def try_handle_context_command(user_input: str) -> bool:
     """
     Handles /context commands (save, load, list, summarize).
     """
     prefix = "/context "
-    if user_input.strip().lower().startswith(prefix):
-        command_body = user_input[len(prefix):].strip()
+    # Ensure we are checking the stripped input for the prefix
+    stripped_input_lower = user_input.strip().lower()
+    if stripped_input_lower.startswith(prefix) or stripped_input_lower == "/context":
+        # Get command body relative to the actual prefix used (e.g. "/context " or "/context")
+        if stripped_input_lower.startswith(prefix): # Handles "/context <subcommand>"
+            command_body = user_input.strip()[len(prefix):].strip()
+        else: # Handles just "/context"
+            command_body = ""
+
         parts = command_body.split(maxsplit=1)
         sub_command = parts[0].lower() if parts else ""
         arg = parts[1] if len(parts) > 1 else ""
@@ -403,13 +411,28 @@ def try_handle_context_command(user_input: str) -> bool: # Keep this function
             summarize_context()
             return True
 
-        else:
+        else: # Handles empty sub_command (just "/context") or unknown sub_command
             console.print("[yellow]Usage: /context <save|load|list|summarize> [name/path][/yellow]")
             console.print("[yellow]  save <name>     - Save current context to a file.[/yellow]")
             console.print("[yellow]  load <name>     - Load context from a file.[/yellow]")
             console.print("[yellow]  list [path]     - List saved contexts in a directory.[/yellow]")
             console.print("[yellow]  summarize       - Summarize current context using the LLM.[/yellow]")
             return True
+    return False
+
+def try_handle_session_command(user_input: str) -> bool:
+    """Handles /session commands by delegating to the /context command handler."""
+    stripped_input = user_input.strip()
+    if stripped_input.lower().startswith("/session"):
+        # Construct the equivalent /context command
+        # /session -> /context
+        # /session foo -> /context foo
+        # len("/session") is 8
+        arguments_part = stripped_input[len("/session"):] # Takes arguments after "/session" (e.g., " save foo" or "")
+        context_equivalent_input = "/context" + arguments_part
+        
+        console.print(f"[dim]Executing '{stripped_input}' as '{context_equivalent_input.strip()}'[/dim]")
+        return try_handle_context_command(context_equivalent_input)
     return False
 
 def save_context(name: str):
@@ -449,7 +472,7 @@ def load_context(name: str):
         console.print(f"[bold red]✗[/bold red] Failed to load context from '{file_name}': {e}\n")
 
 def list_contexts(path: str):
-    """Lists potential context files in the specified directory.""" # Keep this function
+    """Lists potential context files in the specified directory."""
     try:
         # Use imported normalize_path
         normalized_path_str = normalize_path(path)
@@ -476,7 +499,7 @@ def list_contexts(path: str):
         console.print(f"[bold red]✗[/bold red] Failed to list contexts in '{path}': {e}\n")
 
 def summarize_context():
-    """Summarizes the current conversation history using the LLM and replaces the history.""" # Keep this function
+    """Summarizes the current conversation history using the LLM and replaces the history."""
     global conversation_history
 
     if len(conversation_history) <= 1: # Only system prompt
@@ -532,7 +555,7 @@ def summarize_context():
         # History remains unchanged on error
 
 
-def add_directory_to_conversation(directory_path: str): # Keep this function
+def add_directory_to_conversation(directory_path: str):
     with console.status("[bold bright_blue]🔍 Scanning directory...[/bold bright_blue]") as status:
         excluded_files = {
             # Python specific
@@ -624,7 +647,7 @@ def add_directory_to_conversation(directory_path: str): # Keep this function
 
                 except OSError: # Catch read errors
                     skipped_files.append(str(full_path)) # Ensure it's a string
-                except ValueError as e: # Catch errors from normalize_path # This line is missing in coverage
+                except ValueError as e: # Catch errors from normalize_path
                      skipped_files.append(f"{full_path} (Invalid path: {e})")
 
 
@@ -641,7 +664,6 @@ def add_directory_to_conversation(directory_path: str): # Keep this function
                 console.print(f"  [dim]... and {len(skipped_files) - 10} more[/dim]")
         console.print() # Final newline after directory scan summary
 
-# Keep this function
 def ensure_file_in_context(file_path: str) -> bool:
     try:
         # Use imported normalize_path
@@ -689,7 +711,7 @@ def execute_function_call_dict(tool_call_dict) -> str:
             return f"Content of file '{normalized_path}':\n\n{content}"
 
         elif function_name == "read_multiple_files":
-            file_paths = arguments["file_paths"] # This line is missing in coverage
+            file_paths = arguments["file_paths"]
             results = []
             # Use imported normalize_path and util_read_local_file
             for file_path in file_paths:
@@ -697,7 +719,7 @@ def execute_function_call_dict(tool_call_dict) -> str:
                     normalized_path = normalize_path(file_path)
                     content = util_read_local_file(normalized_path)
                     results.append(f"Content of file '{normalized_path}':\n\n{content}")
-                except (OSError, ValueError) as e: # Catch read errors or normalize errors # This line is missing in coverage
+                except (OSError, ValueError) as e: # Catch read errors or normalize errors
                     results.append(f"Error reading '{file_path}': {e}")
             return "\n\n" + "="*50 + "\n\n".join(results)
 
@@ -783,7 +805,7 @@ def execute_function_call_dict(tool_call_dict) -> str:
             return f"Unknown function: {function_name}"
 
     except Exception as e:
-        # This block handles errors from json.loads or any of the specific tool functions # This line is missing in coverage
+        # This block handles errors from json.loads or any of the specific tool functions
         error_message = f"Error executing {function_name}: {str(e)}"
         console.print(f"[red]{error_message}[/red]") # Print the error to console
         return error_message # Return the error message string
@@ -883,10 +905,10 @@ def stream_llm_response(user_message: str):
         stream = completion(
             model=model_name,
             messages=messages_for_api_call, # Use the augmented messages
-            tools=tools, # Use imported tools # This line is missing in coverage
-            max_tokens=max_tokens, # Pass the determined max_tokens # This line is missing in coverage
-            api_base=api_base_url,           # Explicitly pass for this call # This line is missing in coverage
-            temperature=temperature, # Pass the determined temperature # This line is missing in coverage
+            tools=tools, 
+            max_tokens=max_tokens, 
+            api_base=api_base_url,
+            temperature=temperature,
             stream=True
         )
 
@@ -991,7 +1013,6 @@ def stream_llm_response(user_message: str):
                 console.print(f"\n[bold bright_cyan]⚡ Executing {len(formatted_tool_calls)} function call(s)...[/bold bright_cyan]")
 
                 executed_tool_call_ids_and_results = [] # To store results for history
-                # all_tool_calls_confirmed_and_successful = True # This flag is not used consistently, remove or fix
 
                 for tool_call in formatted_tool_calls:
                     tool_name = tool_call['function']['name']
@@ -1000,7 +1021,6 @@ def stream_llm_response(user_message: str):
                     user_confirmed_or_not_risky = True
                     if tool_name in RISKY_TOOLS:
                         console.print(f"[bold yellow]⚠️ This is a risky operation: {tool_name}[/bold yellow]")
-                        # Provide a summary of the operation
                         try:
                             args = json.loads(tool_call['function']['arguments'])
                         except json.JSONDecodeError:
@@ -1010,7 +1030,7 @@ def stream_llm_response(user_message: str):
                                 "tool_call_id": tool_call["id"],
                                 "content": f"Error: Could not parse arguments for {tool_name}"
                             })
-                            continue # Skip execution for this tool call
+                            continue 
 
                         if tool_name == "create_file":
                             console.print(f"   Action: Create/overwrite file '{args.get('file_path')}'")
@@ -1037,24 +1057,17 @@ def stream_llm_response(user_message: str):
                         confirmation = prompt_session.prompt("Proceed with this operation? [Y/n]: ", default="y").strip().lower()
                         if confirmation not in ["y", "yes", ""]:
                             user_confirmed_or_not_risky = False
-                            # all_tool_calls_confirmed_and_successful = False # This flag is not used consistently, remove or fix # This line is missing in coverage
                             console.print("[yellow]ℹ️ Operation cancelled by user.[/yellow]")
-                            result = "User cancelled execution of this tool call." # Result for history
-                        # else: user_confirmed_or_not_risky remains True, proceed to execution
-
+                            result = "User cancelled execution of this tool call." 
+                        
                     if user_confirmed_or_not_risky:
                         try:
-                            result = execute_function_call_dict(tool_call) # Execute the tool call
-                           # Check if the result string itself indicates an error from execute_function_call_dict
+                            result = execute_function_call_dict(tool_call) 
                             if isinstance(result, str) and result.lower().startswith("error:"):
-                                pass # Error is already handled and printed by execute_function_call_dict
-                                # The result string itself is the error message for history
+                                pass 
                         except Exception as e_exec:
-                            # This catch block might be redundant if execute_function_call_dict catches and returns string errors # This line is missing in coverage
-                            # Let's keep it for safety but note that execute_function_call_dict should handle its own exceptions
                             console.print(f"[red]Unexpected error during tool execution: {str(e_exec)}[/red]")
-                            result = f"Error: Unexpected error during tool execution: {str(e_exec)}" # This is the content for history
-                            # all_tool_calls_confirmed_and_successful = False # This flag is not used consistently
+                            result = f"Error: Unexpected error during tool execution: {str(e_exec)}"
 
                     executed_tool_call_ids_and_results.append({
                         "role": "tool",
@@ -1062,30 +1075,22 @@ def stream_llm_response(user_message: str):
                         "content": result
                     })
 
-                # Add all tool results (or cancellations) to conversation history
                 for tool_res in executed_tool_call_ids_and_results:
                     conversation_history.append(tool_res) # type: ignore
 
-                # If any critical tool call was cancelled or failed, the LLM needs to know.
-                # The tool messages already reflect this. The LLM will see "User cancelled..." or "Error..."
-                # and should adjust its follow-up.
-
-                # Get follow-up response after tool execution
                 console.print("\n[bold bright_blue]🔄 Processing results...[/bold bright_blue]")
 
-                # Use the same model_name and api_base_url for the follow-up
-                # Use imported tools again for potential follow-up tool calls
                 follow_up_stream = completion(
                     model=model_name,
-                    messages=conversation_history, # History now contains tool results/cancellations # This line is missing in coverage
-                    tools=tools, # Pass tools again for potential follow-up tool calls # This line is missing in coverage
-                    max_tokens=max_tokens, # Use the determined max_tokens # This line is missing in coverage
+                    messages=conversation_history, 
+                    tools=tools, 
+                    max_tokens=max_tokens, 
                     api_base=api_base_url,
                     stream=True
                 )
 
                 follow_up_content = ""
-                reasoning_started_printed_follow_up = False # Separate flag for follow-up reasoning
+                reasoning_started_printed_follow_up = False 
                 reasoning_content_accumulated_follow_up = ""
 
                 for chunk in follow_up_stream:
@@ -1102,29 +1107,28 @@ def stream_llm_response(user_message: str):
                                 console.print("\n[bold blue]💭 Reasoning...[/bold blue]", end="")
                                 reasoning_started_printed_follow_up = True
                             console.print(".", end="")
-                        # If style is "silent", do nothing
-
+                        
                     elif chunk.choices[0].delta.content:
                         if reasoning_started_printed_follow_up and reasoning_style != "full":
-                            console.print() # Newline after dots or compact header
+                            console.print() 
                             reasoning_started_printed_follow_up = False
 
-                        if not follow_up_content: # First content chunk of follow-up
+                        if not follow_up_content: 
                              console.print("\n\n[bold bright_blue]🤖 Assistant>[/bold bright_blue] ", end="")
 
                         follow_up_content += chunk.choices[0].delta.content
                         console.print(chunk.choices[0].delta.content, end="")
 
                 if reasoning_started_printed_follow_up and reasoning_style == "compact" and not follow_up_content:
-                    console.print() # Newline if only dots were printed for follow-up reasoning
+                    console.print() 
 
-                console.print() # Final newline for follow-up assistant message
+                console.print() 
 
                 assistant_follow_up_message = {
                     "role": "assistant",
                     "content": follow_up_content
                 }
-                if reasoning_content_accumulated_follow_up: # Store full reasoning for history
+                if reasoning_content_accumulated_follow_up: 
                     assistant_follow_up_message["reasoning_content_full"] = reasoning_content_accumulated_follow_up
                 conversation_history.append(assistant_follow_up_message)
         else:
@@ -1134,7 +1138,7 @@ def stream_llm_response(user_message: str):
         return {"success": True}
 
     except Exception as e:
-        error_msg = f"LLM API error: {str(e)}" # This line is missing in coverage
+        error_msg = f"LLM API error: {str(e)}"
         console.print(f"\n[bold red]❌ {error_msg}[/bold red]")
         return {"error": error_msg}
 
@@ -1145,17 +1149,11 @@ def stream_llm_response(user_message: str):
 
 def main():
     # Create an elegant instruction panel listing key commands
-    instructions = """[bold bright_blue]📁 File Operations:[/bold bright_blue]
-  • [bright_cyan]/add path/to/file_or_folder[/bright_cyan] - Add file/folder to context.
-
-[bold bright_blue]🎯 Commands:[/bold bright_blue]
+    instructions = """[bold bright_blue]🎯 Commands:[/bold bright_blue]
   • [bright_cyan]exit[/bright_cyan] or [bright_cyan]quit[/bright_cyan] - End the session
-  • [bright_cyan]/set <param> <value>[/bright_cyan] - Change session config.
   • [bright_cyan]/help[/bright_cyan] - Display detailed help.
-  • [bright_cyan]/shell <cmd>[/bright_cyan] - Execute shell command.
-  • [bright_cyan]/context <subcommand>[/bright_cyan] - Manage conversation history.
 
-  • [bold white]Just ask naturally - the AI will handle file operations automatically![/bold white]"""
+• [bold white]👥 Just ask naturally, like you are communicating with a colleague.[/bold white]"""
 
 
     console.print(Panel(
@@ -1177,21 +1175,20 @@ def main():
         if not user_input:
             continue
 
-        if user_input.lower() in ["exit", "quit"]:
+        if user_input.lower() in ["exit", "quit", "/exit", "/quit"]:
             console.print("[bold bright_blue]👋 Goodbye! Happy coding![/bold bright_blue]")
             sys.exit(0) # Explicitly exit
 
         # Check for and handle commands
         if try_handle_add_command(user_input):
             continue
-
         if try_handle_set_command(user_input):
             continue
-
         if try_handle_help_command(user_input):
             continue
-
         if try_handle_shell_command(user_input):
+            continue
+        if try_handle_session_command(user_input): # New: session handler
             continue
         if try_handle_context_command(user_input):
             continue
@@ -1201,9 +1198,6 @@ def main():
 
         if response_data.get("error"):
             # stream_llm_response already prints its own detailed API error.
-            # This print in main should match the test TestMainLoop.test_main_loop_llm_error
-            # stream_llm_response already prints its own detailed API error,
-            # so we can skip printing it again here to avoid redundancy.
             pass
 
 
