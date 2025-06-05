@@ -12,4 +12,5 @@ temperature
 * /context load <name> - Load a saved conversation context. 
 * /context list- List saved contexts. 
 * /context summarize - Summarize current context using the LLM. 
+* /session - Same as /context (all subcommands work the same way)
 * Just ask naturally - the AI will handle file operations automatically!

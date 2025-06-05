@@ -370,6 +370,16 @@ def try_handle_shell_command(user_input: str) -> bool:
         return True
     return False
 
+def try_handle_session_command(user_input: str) -> bool:
+    """
+    Handles /session commands (save, load, list, summarize) - equivalent to /context.
+    """
+    prefix = "/session "
+    if user_input.strip().lower().startswith(prefix):
+        # Replace '/session' with '/context' and pass to context handler
+        return try_handle_context_command(user_input.replace("/session ", "/context ", 1))
+    return False
+
 def try_handle_context_command(user_input: str) -> bool: # Keep this function
     """
     Handles /context commands (save, load, list, summarize).
@@ -1154,6 +1164,7 @@ def main():
   • [bright_cyan]/help[/bright_cyan] - Display detailed help.
   • [bright_cyan]/shell <cmd>[/bright_cyan] - Execute shell command.
   • [bright_cyan]/context <subcommand>[/bright_cyan] - Manage conversation history.
+  • [bright_cyan]/session <subcommand>[/bright_cyan] - Same as /context (save/load/list/summarize)
 
   • [bold white]Just ask naturally - the AI will handle file operations automatically![/bold white]"""
 
@@ -1194,6 +1205,9 @@ def main():
         if try_handle_shell_command(user_input):
             continue
         if try_handle_context_command(user_input):
+            continue
+
+        if try_handle_session_command(user_input):
             continue
 
         # Use imported stream_llm_response
