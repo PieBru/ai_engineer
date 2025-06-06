@@ -201,7 +201,6 @@ def _handle_remote_mcp_sse(endpoint_url: str, max_events: int, listen_timeout_se
         return f"An unexpected error occurred with remote MCP SSE '{endpoint_url}': {str(e)}"
 
 
-
 def try_handle_add_command(user_input: str) -> bool:
     command_name_lower = "/add"
     prefix_with_space = command_name_lower + " "
