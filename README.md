@@ -1,4 +1,4 @@
-# AI Engineer v2 🐋
+# 🦾 AI Engineer
 
 ## Overview
 
