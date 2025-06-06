@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 import tomllib # For reading TOML config (Python 3.11+)
-from typing import Dict, Any
+from typing import Dict, Any, Union, Tuple
 from dotenv import load_dotenv
 
 # Global dictionary to hold configurations loaded from config.toml
@@ -12,6 +12,32 @@ RUNTIME_OVERRIDES: Dict[str, Any] = {}
 # Define module-level constants for limits
 MAX_FILES_TO_PROCESS_IN_DIR = 1000
 MAX_FILE_SIZE_BYTES = 5_000_000  # 5MB
+
+# Context window sizes for various models (in tokens)
+# This is a sample list and might need to be updated or made more comprehensive.
+MODEL_CONTEXT_WINDOWS: Dict[str, int] = {
+    "openrouter/deepseek/deepseek-coder": 128000,  # via OpenRouter
+    "openrouter/deepseek/deepseek-chat": 128000,  # via OpenRouter
+    "openrouter/deepseek/deepseek-reasoner": 128000,  # via OpenRouter
+    "deepseek-reasoner": 128000,  # via DeepSeek
+    "gpt-4o": 128000,
+    "gpt-4-turbo": 128000, # Covers various gpt-4-turbo versions
+    "gpt-4-vision-preview": 128000,
+    "gpt-4": 8192,
+    "gpt-4-32k": 32768,
+    "gpt-3.5-turbo": 16385, # Covers various gpt-3.5-turbo versions
+    "claude-3-opus-20240229": 200000,
+    "claude-3-sonnet-20240229": 200000,
+    "claude-3-haiku-20240307": 200000,
+    "claude-2.1": 200000,
+    "claude-2": 100000,
+    "claude-instant-1.2": 100000,
+    "gemini-1.5-pro-latest": 1048576,
+    "gemini-1.0-pro": 30720,
+    "gemini-pro": 30720,
+}
+
+DEFAULT_CONTEXT_WINDOW = 8192 # Fallback if a model is not in the map
 
 SUPPORTED_SET_PARAMS = {
     "model": {
@@ -93,6 +119,47 @@ def load_configuration(console_obj):
             console_obj.print(f"[yellow]Warning: Could not parse config.toml: {e}. Using defaults and environment variables.[/yellow]")
         except Exception as e: # pylint: disable=broad-except
             console_obj.print(f"[yellow]Warning: Error loading config.toml: {e}. Using defaults and environment variables.[/yellow]")
+
+def get_model_context_window(model_name: str, return_match_status: bool = False) -> Union[int, Tuple[int, bool]]:
+    """
+    Retrieves the context window size for a given model name.
+    It tries to find an exact match or a prefix match in MODEL_CONTEXT_WINDOWS.
+    If return_match_status is True, returns a tuple (window_size, used_default_due_to_no_match).
+    'used_default_due_to_no_match' is True if DEFAULT_CONTEXT_WINDOW was returned because
+    the model_name did not match any specific entry or prefix.
+    """
+    used_default_due_to_no_match = False
+
+    if not model_name:
+        used_default_due_to_no_match = True
+        if return_match_status:
+            return DEFAULT_CONTEXT_WINDOW, used_default_due_to_no_match
+        return DEFAULT_CONTEXT_WINDOW
+
+    # Exact match
+    if model_name in MODEL_CONTEXT_WINDOWS:
+        window = MODEL_CONTEXT_WINDOWS[model_name]
+        # matched_specific_entry is True, so used_default_due_to_no_match remains False
+        if return_match_status:
+            return window, used_default_due_to_no_match
+        return window
+
+    # Prefix match (e.g., "gpt-4o-mini" should match "gpt-4o")
+    # Sort keys by length descending to match more specific prefixes first
+    sorted_model_keys = sorted(MODEL_CONTEXT_WINDOWS.keys(), key=len, reverse=True)
+    for prefix in sorted_model_keys:
+        if model_name.startswith(prefix):
+            window = MODEL_CONTEXT_WINDOWS[prefix]
+            # matched_specific_entry is True (via prefix), so used_default_due_to_no_match remains False
+            if return_match_status:
+                return window, used_default_due_to_no_match
+            return window
+            
+    # If we reach here, no specific match (exact or prefix) was found.
+    used_default_due_to_no_match = True
+    if return_match_status:
+        return DEFAULT_CONTEXT_WINDOW, used_default_due_to_no_match
+    return DEFAULT_CONTEXT_WINDOW
 
 def get_config_value(param_name: str, default_value: Any, console_obj=None) -> Any:
     """

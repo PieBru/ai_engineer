@@ -26,7 +26,8 @@ import httpx # For new MCP tools
 from src.config_utils import (
     load_configuration as load_app_configuration, get_config_value,
     SUPPORTED_SET_PARAMS, MAX_FILES_TO_PROCESS_IN_DIR, MAX_FILE_SIZE_BYTES,
-    RUNTIME_OVERRIDES
+    RUNTIME_OVERRIDES,
+    get_model_context_window # Import the helper function
 )
 from src.file_utils import (
     normalize_path, is_binary_file, read_local_file as util_read_local_file, # Renamed read_local_file to util_read_local_file
@@ -36,7 +37,7 @@ from src.tool_defs import tools, RISKY_TOOLS
 from src.prompts import system_PROMPT
 from prompt_toolkit.styles import Style as PromptStyle # Keep PromptStyle import
 # Import litellm
-from litellm import completion
+from litellm import completion, token_counter # Added token_counter
 from rich.markdown import Markdown as RichMarkdown # Import Rich's Markdown
 
 # Initialize Rich console and prompt session
@@ -191,9 +192,20 @@ def _handle_remote_mcp_sse(endpoint_url: str, max_events: int, listen_timeout_se
 
 
 def try_handle_add_command(user_input: str) -> bool:
-    prefix = "/add "
-    if user_input.strip().lower().startswith(prefix):
-        path_to_add = user_input[len(prefix):].strip()
+    command_name_lower = "/add"
+    prefix_with_space = command_name_lower + " "
+    stripped_input_lower = user_input.strip().lower()
+
+    if stripped_input_lower == command_name_lower or stripped_input_lower.startswith(prefix_with_space):
+        path_to_add = ""
+        if stripped_input_lower.startswith(prefix_with_space):
+            path_to_add = user_input.strip()[len(prefix_with_space):].strip()
+
+        if not path_to_add:
+            console.print("[yellow]Usage: /add <file_path_or_folder_path>[/yellow]")
+            console.print("[yellow]  Example: /add src/my_file.py[/yellow]")
+            console.print("[yellow]  Example: /add ./my_project_folder[/yellow]")
+            return True
         try:
             # Use imported normalize_path
             normalized_path = normalize_path(path_to_add)
@@ -222,16 +234,23 @@ def try_handle_set_command(user_input: str) -> bool:
     Handles the /set command to change configuration parameters at runtime.
     """
     prefix = "/set "
-    if user_input.strip().lower().startswith(prefix):
-        command_body = user_input[len(prefix):].strip()
+    command_name_lower = "/set"
+    stripped_input_lower = user_input.strip().lower()
+
+    if stripped_input_lower == command_name_lower or stripped_input_lower.startswith(prefix):
+        command_body = ""
+        if stripped_input_lower.startswith(prefix):
+            command_body = user_input.strip()[len(prefix):].strip()
+
         if not command_body:
-            console.print("[yellow]Usage: /set <parameter> <value>[/yellow]")
             # Use imported SUPPORTED_SET_PARAMS
             console.print("[yellow]Available parameters to set:[/yellow]")
             for p_name, p_config in SUPPORTED_SET_PARAMS.items():
                 console.print(f"  [bright_cyan]{p_name}[/bright_cyan]: {p_config['description']}")
                 if "allowed_values" in p_config:
                     console.print(f"    Allowed: {', '.join(p_config['allowed_values'])}")
+            console.print("\n[yellow]Usage: /set <parameter> <value>[/yellow]")
+            console.print("[yellow]  Example: /set model gpt-4o[/yellow]")
             return True
 
         command_parts = command_body.split(maxsplit=1)
@@ -310,10 +329,17 @@ def try_handle_shell_command(user_input: str) -> bool:
     Handles the /shell command to execute a shell command and add output to history.
     """
     prefix = "/shell "
-    if user_input.strip().lower().startswith(prefix):
-        command_body = user_input[len(prefix):].strip()
+    command_name_lower = "/shell"
+    stripped_input_lower = user_input.strip().lower()
+
+    if stripped_input_lower == command_name_lower or stripped_input_lower.startswith(prefix):
+        command_body = ""
+        if stripped_input_lower.startswith(prefix):
+            command_body = user_input.strip()[len(prefix):].strip()
+
         if not command_body:
             console.print("[yellow]Usage: /shell <command and arguments>[/yellow]")
+            console.print("[yellow]  Example: /shell ls -l[/yellow]")
             console.print("[bold yellow]⚠️ Warning: Executing arbitrary shell commands can be risky.[/bold yellow]")
             return True
 
@@ -1147,27 +1173,74 @@ def stream_llm_response(user_message: str):
 # 7. Main interactive loop
 # --------------------------------------------------------------------------------
 
+def clear_screen():
+    """Clears the terminal screen."""
+    # For Windows
+    if os.name == 'nt':
+        _ = os.system('cls')
+    # For Mac and Linux (os.name is 'posix')
+    else:
+        _ = os.system('clear')
+
 def main():
+    clear_screen()
+    # Get the current model name to display in the welcome panel
+    # Use the imported get_config_value function
+    current_model_name = get_config_value("model", "gpt-4o") # Default if not found
+
     # Create an elegant instruction panel listing key commands
-    instructions = """[bold bright_blue]🎯 Commands:[/bold bright_blue]
-  • [bright_cyan]exit[/bright_cyan] or [bright_cyan]quit[/bright_cyan] - End the session
+    instructions = f"""[bold bright_blue]🎯 Commands:[/bold bright_blue]
+  • [bright_cyan]/exit[/bright_cyan] or [bright_cyan]/quit[/bright_cyan] - End the session.
   • [bright_cyan]/help[/bright_cyan] - Display detailed help.
 
-• [bold white]👥 Just ask naturally, like you are communicating with a colleague.[/bold white]"""
+Model: [bold magenta]{current_model_name}[/bold magenta]
 
+[bold white]👥 Just ask naturally, like you are communicating with a colleague.[/bold white]"""
 
     console.print(Panel(
         instructions,
         border_style="blue",
         padding=(1, 2),
-        title="[bold blue]🤖 AI Code Assistant - How to Use[/bold blue]",
+        title="[bold blue]🤖 AI Code Assistant[/bold blue]",
         title_align="left"
     ))
     console.print()
 
     while True:
         try:
-            user_input = prompt_session.prompt("🔵 You> ").strip()
+            prompt_prefix = ""
+            # Calculate context usage for the prompt
+            # Ensure conversation_history is accessible here (it's global)
+            # and get_config_value, get_model_context_window are imported
+            if conversation_history: # Only calculate if there's history
+                try:
+                    current_model_name = get_config_value("model", "gpt-4o") # Get current model
+                    # Get window size and status if default was used due to no match
+                    context_window_size, used_default_window_due_to_no_match = get_model_context_window(current_model_name, return_match_status=True)
+
+                    # Make sure conversation_history is not empty and model_name is valid for token_counter
+                    if conversation_history and current_model_name:
+                        # The first message is the system prompt, which is always there.
+                        tokens_used = token_counter(model=current_model_name, messages=conversation_history)
+
+                        if context_window_size > 0: # Avoid division by zero
+                            percentage_used = (tokens_used / context_window_size) * 100
+                            default_note = ""
+                            # Add a note if the default window was used because the model name wasn't specifically found
+                            if used_default_window_due_to_no_match:
+                                default_note = " (default window)"
+                            prompt_prefix = f"[Ctx: {percentage_used:.0f}%{default_note}] "
+                        else: # Should not happen if get_model_context_window returns a default
+                            prompt_prefix = f"[Ctx: {tokens_used} toks] "
+                except Exception as e:
+                    # Silently fail or print a dim message if token calculation fails
+                    # For example, if litellm.token_counter doesn't support the model
+                    # console.print(f"[dim]Could not calculate token usage: {e}[/dim]")
+                    pass # Keep prompt clean if there's an error
+
+
+            user_input = prompt_session.prompt(f"{prompt_prefix}🔵 You> ").strip()
+
         except (EOFError, KeyboardInterrupt):
             console.print("\n[bold yellow]👋 Exiting gracefully...[/bold yellow]")
             sys.exit(0) # Explicitly exit
