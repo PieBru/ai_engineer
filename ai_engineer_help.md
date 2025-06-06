@@ -41,6 +41,18 @@
     - `refine <text>`: Optimizes `<text>` into a clearer and more effective prompt.
     - `detail <text>`: Expands `<text>` into a more comprehensive and detailed prompt.
 
+*   **`/ask`** `<text>` - Treat the following text as a direct user prompt to the LLM.
+    Call `/ask` without arguments for detailed usage.
+    Example: `/ask Explain the concept of recursion.`
+
+*   **`/script`** `<script_path>` - Execute a sequence of AI Engineer commands from the specified script file.
+    Call `/script` without arguments for detailed usage.
+    Example: `/script ./my_setup_script.aiescript`
+    The script file contains AI Engineer commands, one per line. Lines starting with `#` are comments.
+
+*   **`/time`** - Toggle the display of a timestamp in the user prompt.
+    Example: `[Ctx: 5%, 16:04:52] You>`
+
 *   **`/rules`** `<subcommand> [arguments]` - Manage the AI's guiding rules (system prompt).
     Call `/rules` without arguments for detailed usage.
     Subcommands:

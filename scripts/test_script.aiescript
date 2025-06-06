@@ -1,0 +1,13 @@
+# Create a dummy script file for testing
+# tests/test_script.aiescript
+# ---------------------------------
+# This is a comment
+/add ./ai_engineer.py
+/set temperature 0.1
+This is a prompt to the LLM from the script.
+# Another comment
+/shell echo "My name is PieBru, my cat name is Felix."
+/prompt refine "Hello world."
+/rules list
+/ask "What's my name?"
+/ask "What is the try_handle_help_command(...) function syntax?"

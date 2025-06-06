@@ -19,6 +19,7 @@ from prompt_toolkit import PromptSession
 import time # For tool call IDs
 import subprocess # For /shell command
 import copy # For deepcopy
+import argparse # For command-line argument handling
 from textwrap import dedent # For /prompt command meta-prompts
 import httpx # For new MCP tools
 # Removed: import tomllib # For reading TOML config (Python 3.11+) - now in config_utils.py
@@ -41,15 +42,24 @@ from prompt_toolkit.styles import Style as PromptStyle # Keep PromptStyle import
 from litellm import completion, token_counter # Added token_counter
 from rich.markdown import Markdown as RichMarkdown # Import Rich's Markdown
 
+# Define the application version
+__version__ = "0.2.0" # Example version
+
 # Initialize Rich console and prompt session
 console = Console()
 prompt_session = PromptSession(
+    # Add a bottom toolbar for persistent status messages if desired
+    # bottom_toolbar=HTML('Timestamp: <b Fg="ansired">OFF</b>'), # Example
+
     style=PromptStyle.from_dict({
         'prompt': '#0066ff bold',  # Bright blue prompt
         'completion-menu.completion': 'bg:#1e3a8a fg:#ffffff',
         'completion-menu.completion.current': 'bg:#3b82f6 fg:#ffffff bold',
     })
 )
+
+# Global state for timestamp display
+SHOW_TIMESTAMP_IN_PROMPT = False
 
 
 # Removed: def load_configuration(): ...
@@ -1371,6 +1381,33 @@ def clear_screen():
         _ = os.system('clear')
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="AI Engineer: An AI-powered coding assistant.",
+        formatter_class=argparse.RawTextHelpFormatter # To preserve help text formatting
+    )
+    parser.add_argument(
+        '--version',
+        action='version',
+        version=f'%(prog)s {__version__}'
+    )
+    parser.add_argument(
+        '--script',
+        metavar='SCRIPT_PATH',
+        type=str,
+        help='Path to a script file to execute on startup.'
+    )
+    parser.add_argument(
+        '--noconfirm',
+        action='store_true',
+        help='Skip confirmation prompts when using --init.'
+    )
+    parser.add_argument(
+        '--time',
+        action='store_true',
+        help='Enable timestamp display in the prompt on startup.'
+    )
+    args = parser.parse_args()
+
     clear_screen()
     # Get the current model name to display in the welcome panel
     # Use the imported get_config_value function
@@ -1399,6 +1436,28 @@ def main():
         title_align="left"
     ))
     console.print()
+
+    global SHOW_TIMESTAMP_IN_PROMPT
+    if args.time:
+        SHOW_TIMESTAMP_IN_PROMPT = True
+        console.print("[green]✓ Timestamp display in prompt enabled via --time flag.[/green]")
+
+    if args.script: # Changed from args.init
+        if not args.noconfirm:
+            confirmation = prompt_session.prompt(
+                f"Execute script '[bright_cyan]{args.script}[/bright_cyan]'? [y/N]: ", # Changed from args.init
+                default="n" # Default to No
+            ).strip().lower()
+            if confirmation not in ["y", "yes"]:
+                console.print("[yellow]Script execution cancelled by user.[/yellow]")
+            else:
+                console.print(f"[bold green]Executing script: {args.script}[/bold green]") # Changed from args.init
+                # Construct the command as if typed by the user
+                script_command_str = f"/script {args.script}" # Changed from /init
+                try_handle_script_command(script_command_str, is_startup_script=True) # Changed from try_handle_init_command
+        else: # --noconfirm was used
+            script_command_str = f"/script {args.script}" # Changed from /init
+            try_handle_script_command(script_command_str, is_startup_script=True) # Changed from try_handle_init_command
 
     while True:
         try:
@@ -1432,6 +1491,8 @@ def main():
                     # console.print(f"[dim]Could not calculate token usage: {e}[/dim]")
                     pass # Keep prompt clean if there's an error
 
+            if SHOW_TIMESTAMP_IN_PROMPT:
+                prompt_prefix += f"{time.strftime('%H:%M:%S')} "
 
             user_input = prompt_session.prompt(f"{prompt_prefix}🔵 You> ").strip()
 
@@ -1463,6 +1524,12 @@ def main():
             continue
         if try_handle_prompt_command(user_input): # New: prompt command handler
             continue
+        if try_handle_script_command(user_input): # Changed from try_handle_init_command
+            continue 
+        if try_handle_ask_command(user_input): # New: ask command handler
+            continue
+        if try_handle_time_command(user_input): # New: time command handler
+            continue
 
         # Use imported stream_llm_response
         response_data = stream_llm_response(user_input) # user_input is the raw message
@@ -1475,6 +1542,103 @@ def main():
     console.print("[bold blue]✨ Session finished. Thank you for using AI Engineer![/bold blue]")
     sys.exit(0) # Ensure exit at the end of main too
 
+def execute_script_line(line: str):
+    """
+    Executes a single line from an init script.
+    Tries to match it against known commands, otherwise sends to LLM.
+    """
+    console.print(f"\n[bold bright_magenta]📜 Script> {line}[/bold bright_magenta]") # Changed icon for clarity
+    if try_handle_add_command(line): return
+    if try_handle_set_command(line): return
+    if try_handle_help_command(line): return # Less likely in a script, but possible
+    if try_handle_shell_command(line): return
+    if try_handle_session_command(line): return
+    if try_handle_rules_command(line): return
+    if try_handle_context_command(line): return
+    if try_handle_prompt_command(line): return
+    # If it's not any of the above commands, treat it as a prompt to the LLM
+    stream_llm_response(line)
+
+def try_handle_script_command(user_input: str, is_startup_script: bool = False) -> bool: # Renamed from try_handle_init_command
+    """
+    Handles the /script <script_path> command.
+    Executes a sequence of AI Engineer commands from the specified script file.
+    """
+    prefix = "/script " # Changed from /init
+    command_name_lower = "/script" # Changed from /init
+    stripped_input_lower = user_input.strip().lower()
+
+    if stripped_input_lower.startswith(prefix) or (is_startup_script and stripped_input_lower == command_name_lower):
+        script_path_arg = ""
+        if stripped_input_lower.startswith(prefix):
+            script_path_arg = user_input.strip()[len(prefix):].strip()
+        elif is_startup_script and stripped_input_lower == command_name_lower: # Case for --init without path (should not happen with current argparse)
+            # This case should ideally not be hit if --script always requires a SCRIPT_PATH
+            console.print("[yellow]Usage: /script <script_path>[/yellow]")
+            return True
+
+        if not script_path_arg:
+            console.print("[yellow]Usage: /script <script_path>[/yellow]")
+            console.print("[yellow]  Example: /script ./my_setup_script.aiescript[/yellow]")
+            console.print("[yellow]  The script file contains AI Engineer commands, one per line. Lines starting with '#' are comments.[/yellow]")
+            return True
+
+        try:
+            normalized_script_path = normalize_path(script_path_arg)
+            console.print(f"[bold blue]🚀 Executing script: [bright_cyan]{normalized_script_path}[/bright_cyan][/bold blue]")
+            with open(normalized_script_path, "r", encoding="utf-8") as f:
+                for line_num, line in enumerate(f, 1):
+                    stripped_line = line.strip()
+                    if not stripped_line or stripped_line.startswith("#"): # Skip empty lines and comments
+                        continue
+                    execute_script_line(stripped_line)
+            console.print(f"[bold green]✅ Script execution finished: [bright_cyan]{normalized_script_path}[/bright_cyan][/bold green]\n")
+
+        except FileNotFoundError:
+            console.print(f"[bold red]✗ Error: Script file not found at '[bright_cyan]{script_path_arg}[/bright_cyan]'[/bold red]")
+        except ValueError as e: # From normalize_path
+            console.print(f"[bold red]✗ Error: Invalid script path '[bright_cyan]{script_path_arg}[/bright_cyan]': {e}[/bold red]")
+        except Exception as e:
+            console.print(f"[bold red]✗ Error during script execution from '{script_path_arg}': {e}[/bold red]")
+        return True
+    return False
+
+def try_handle_ask_command(user_input: str) -> bool:
+    """
+    Handles the /ask <text> command.
+    Treats the text following /ask as a user prompt to the LLM.
+    """
+    prefix = "/ask "
+    command_name_lower = "/ask"
+    stripped_input_lower = user_input.strip().lower()
+
+    if stripped_input_lower.startswith(prefix) or stripped_input_lower == command_name_lower:
+        text_to_ask = user_input.strip()[len(command_name_lower):].strip()
+
+        if not text_to_ask:
+            console.print("[yellow]Usage: /ask <text>[/yellow]")
+            console.print("[yellow]  Example: /ask What is the capital of France?[/yellow]")
+            return True
+
+        stream_llm_response(text_to_ask) # Pass the text directly to the LLM
+        return True
+    return False
+
+def try_handle_time_command(user_input: str) -> bool:
+    """
+    Handles the /time command to toggle timestamp display in the prompt.
+    """
+    global SHOW_TIMESTAMP_IN_PROMPT
+    command_name_lower = "/time"
+
+    if user_input.strip().lower() == command_name_lower:
+        SHOW_TIMESTAMP_IN_PROMPT = not SHOW_TIMESTAMP_IN_PROMPT
+        if SHOW_TIMESTAMP_IN_PROMPT:
+            console.print("[green]✓ Timestamp display in prompt: ON[/green]")
+        else:
+            console.print("[yellow]✓ Timestamp display in prompt: OFF[/yellow]")
+        return True
+    return False
 
 if __name__ == "__main__":
     main()

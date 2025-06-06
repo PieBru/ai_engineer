@@ -1094,6 +1094,9 @@ class TestMainLoop:
     @patch('ai_engineer.stream_llm_response')
     @patch('ai_engineer.try_handle_prompt_command', return_value=False) # Mock new command handlers
     @patch('ai_engineer.try_handle_add_command', return_value=False) # Assume no /add commands
+    @patch('ai_engineer.try_handle_script_command', return_value=False) # Mock new command handlers
+    @patch('ai_engineer.try_handle_ask_command', return_value=False) # Mock new command handlers
+    @patch('ai_engineer.try_handle_time_command', return_value=False) # Mock new command handler
     def test_main_loop_exit_quit(self, mock_handle_add, mock_stream_response, monkeypatch):
         # Test 'exit'
         de.prompt_session.prompt = MagicMock(return_value="exit")
@@ -1117,6 +1120,9 @@ class TestMainLoop:
 
     @patch('ai_engineer.stream_llm_response')
     @patch('ai_engineer.try_handle_prompt_command', return_value=False)
+    @patch('ai_engineer.try_handle_script_command', return_value=False)
+    @patch('ai_engineer.try_handle_ask_command', return_value=False)
+    @patch('ai_engineer.try_handle_time_command', return_value=False)
     @patch('ai_engineer.try_handle_add_command', return_value=False)
     def test_main_loop_eof_keyboard_interrupt(self, mock_handle_add, mock_stream_response, monkeypatch):
         # Test EOFError
@@ -1140,6 +1146,9 @@ class TestMainLoop:
 
     @patch('ai_engineer.stream_llm_response', return_value={"success": True})
     @patch('ai_engineer.try_handle_prompt_command', return_value=False)
+    @patch('ai_engineer.try_handle_script_command', return_value=False)
+    @patch('ai_engineer.try_handle_ask_command', return_value=False)
+    @patch('ai_engineer.try_handle_time_command', return_value=False)
     @patch('ai_engineer.try_handle_add_command', return_value=False)
     def test_main_loop_empty_and_normal_input(self, mock_handle_add, mock_stream_response, monkeypatch):
         # Simulate empty input, then normal input, then exit
@@ -1153,6 +1162,9 @@ class TestMainLoop:
 
     @patch('ai_engineer.stream_llm_response', return_value={"error": "Simulated API Error"})
     @patch('ai_engineer.try_handle_prompt_command', return_value=False)
+    @patch('ai_engineer.try_handle_script_command', return_value=False)
+    @patch('ai_engineer.try_handle_ask_command', return_value=False)
+    @patch('ai_engineer.try_handle_time_command', return_value=False)
     @patch('ai_engineer.try_handle_add_command', return_value=False)
     def test_main_loop_llm_error(self, mock_handle_add, mock_stream_response, monkeypatch):
         # Simulate normal input, then LLM error, then exit
@@ -1171,6 +1183,9 @@ class TestMainLoop:
     @patch('ai_engineer.token_counter', return_value=1000) # Mock token_counter
     @patch('ai_engineer.get_config_value') # Mock get_config_value
     @patch('ai_engineer.get_model_context_window', return_value=(8000, False)) # Mock context window
+    @patch('ai_engineer.try_handle_script_command', return_value=False) # Mock new command handlers
+    @patch('ai_engineer.try_handle_ask_command', return_value=False) # Mock new command handlers
+    @patch('ai_engineer.try_handle_time_command', return_value=False) # Mock new command handler
     @patch('ai_engineer.stream_llm_response', return_value={"success": True}) # Mock LLM response
     def test_main_loop_prompt_prefix_context_usage(
         self, mock_stream_llm, mock_get_model_window, mock_get_config, mock_token_counter, mock_prompt_session_obj, monkeypatch
@@ -1194,3 +1209,150 @@ class TestMainLoop:
         # Check that prompt was called with the context usage prefix.
         # 1000 tokens / 8000 window = 12.5%. "{:.0f}".format(12.5) is "12".
         mock_prompt_session_obj.prompt.assert_any_call("[Ctx: 12%] 🔵 You> ")
+
+
+class TestScriptCommand: # Renamed from TestInitCommand
+    @pytest.fixture
+    def temp_script_file(self, tmp_path):
+        script_content = """
+# This is a comment
+/add some_file.txt
+/set model test_script_model
+This is a prompt to the LLM from the script.
+/shell echo "Hello from script"
+"""
+        script_file = tmp_path / "test_init_script.aiescript"
+        script_file.write_text(script_content)
+        
+        # Create the dummy file for the /add command in the script
+        (tmp_path / "some_file.txt").write_text("content of some_file.txt")
+        return script_file
+
+    @patch('ai_engineer.execute_script_line')
+    @patch('ai_engineer.normalize_path')
+    def test_try_handle_script_command_success(self, mock_normalize, mock_execute_script_line, temp_script_file, tmp_path): # Renamed
+        mock_normalize.return_value = str(temp_script_file)
+        
+        # Change CWD so that relative paths in script (like some_file.txt) are found relative to tmp_path
+        # This is important because normalize_path in try_handle_add_command (called by execute_script_line)
+        # will resolve based on CWD.
+        original_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        try:
+            handled = de.try_handle_script_command(f"/script {str(temp_script_file)}") # Renamed
+            assert handled
+            mock_normalize.assert_called_once_with(str(temp_script_file))
+            
+            expected_calls = [
+                call("/add some_file.txt"),
+                call("/set model test_script_model"),
+                call("This is a prompt to the LLM from the script."),
+                call('/shell echo "Hello from script"')
+            ]
+            mock_execute_script_line.assert_has_calls(expected_calls, any_order=False)
+            assert mock_execute_script_line.call_count == 4
+        finally:
+            os.chdir(original_cwd)
+
+    @patch('ai_engineer.console.print')
+    def test_try_handle_script_command_file_not_found(self, mock_console_print): # Renamed
+        script_path = "non_existent_script.aiescript"
+        handled = de.try_handle_script_command(f"/script {script_path}") # Renamed
+        assert handled
+        mock_console_print.assert_any_call(f"[bold red]✗ Error: Script file not found at '[bright_cyan]{script_path}[/bright_cyan]'[/bold red]")
+
+    @patch('ai_engineer.console.print')
+    def test_try_handle_script_command_no_arg(self, mock_console_print): # Renamed
+        handled = de.try_handle_script_command("/script") # Renamed
+        assert handled
+        mock_console_print.assert_any_call("[yellow]Usage: /script <script_path>[/yellow]")
+
+    @patch('ai_engineer.try_handle_add_command')
+    @patch('ai_engineer.stream_llm_response')
+    def test_execute_script_line_calls_correct_handlers(self, mock_stream_llm, mock_handle_add):
+        # Test /add command
+        de.execute_script_line("/add test.txt")
+        mock_handle_add.assert_called_once_with("/add test.txt")
+        mock_stream_llm.assert_not_called()
+        mock_handle_add.reset_mock()
+
+        # Test LLM prompt
+        de.execute_script_line("This is a prompt")
+        mock_stream_llm.assert_called_once_with("This is a prompt")
+        mock_handle_add.assert_not_called()
+
+    @patch('argparse.ArgumentParser.parse_args')
+    @patch('ai_engineer.try_handle_script_command') # Renamed
+    @patch('ai_engineer.prompt_session') # For confirmation
+    def test_main_cli_script_with_confirmation_yes(self, mock_prompt_session, mock_try_script, mock_parse_args, temp_script_file, monkeypatch): # Renamed
+        mock_args = MagicMock()
+        mock_args.script = str(temp_script_file) # Changed from init
+        mock_args.noconfirm = False
+        mock_parse_args.return_value = mock_args
+        
+        mock_prompt_session.prompt.return_value = "y" # User confirms
+
+        # Mock the interactive loop part to prevent it from running
+        monkeypatch.setattr(de.prompt_session, 'prompt', MagicMock(side_effect=["hello", KeyboardInterrupt])) # Simulate one input then exit
+        
+        with pytest.raises(SystemExit): # Main loop will exit due to KeyboardInterrupt
+            de.main()
+        
+        mock_prompt_session.prompt.assert_any_call(
+            f"Execute script '[bright_cyan]{str(temp_script_file)}[/bright_cyan]'? [y/N]: ", # Changed
+            default="n"
+        )
+        mock_try_script.assert_called_once_with(f"/script {str(temp_script_file)}", is_startup_script=True) # Renamed
+
+
+class TestAskCommand:
+    @patch('ai_engineer.stream_llm_response')
+    def test_try_handle_ask_command_success(self, mock_stream_llm_response):
+        test_text = "Tell me about Python."
+        handled = de.try_handle_ask_command(f"/ask {test_text}")
+        assert handled
+        mock_stream_llm_response.assert_called_once_with(test_text)
+
+    @patch('ai_engineer.console.print')
+    @patch('ai_engineer.stream_llm_response')
+    def test_try_handle_ask_command_no_arg(self, mock_stream_llm_response, mock_console_print):
+        handled = de.try_handle_ask_command("/ask")
+        assert handled
+        mock_stream_llm_response.assert_not_called()
+        mock_console_print.assert_any_call("[yellow]Usage: /ask <text>[/yellow]")
+        mock_console_print.assert_any_call("[yellow]  Example: /ask What is the capital of France?[/yellow]")
+
+
+class TestTimeCommand:
+    @patch('ai_engineer.console.print')
+    def test_try_handle_time_command_toggle(self, mock_console_print):
+        # Ensure SHOW_TIMESTAMP_IN_PROMPT is initially False (default or reset by fixture)
+        de.SHOW_TIMESTAMP_IN_PROMPT = False
+
+        # First call: Toggle ON
+        handled = de.try_handle_time_command("/time")
+        assert handled
+        assert de.SHOW_TIMESTAMP_IN_PROMPT is True
+        mock_console_print.assert_called_with("[green]✓ Timestamp display in prompt: ON[/green]")
+
+        # Second call: Toggle OFF
+        handled = de.try_handle_time_command("/time")
+        assert handled
+        assert de.SHOW_TIMESTAMP_IN_PROMPT is False
+        mock_console_print.assert_called_with("[yellow]✓ Timestamp display in prompt: OFF[/yellow]")
+
+    @patch('ai_engineer.time.strftime', return_value="12:34:56") # Mock time.strftime
+    @patch('ai_engineer.token_counter', return_value=100) # Mock token_counter
+    @patch('ai_engineer.get_config_value', return_value="test_model") # Mock get_config_value
+    @patch('ai_engineer.get_model_context_window', return_value=(1000, False)) # Mock context window
+    def test_main_loop_prompt_with_time_enabled(self, mock_get_model_window, mock_get_config, mock_token_counter, mock_strftime, monkeypatch):
+        de.SHOW_TIMESTAMP_IN_PROMPT = True # Enable timestamp
+        de.conversation_history = [{"role": "system", "content": "sys"}] # Minimal history
+
+        # Simulate one input then exit
+        de.prompt_session.prompt = MagicMock(side_effect=["hello", KeyboardInterrupt])
+        
+        with pytest.raises(SystemExit):
+            de.main()
+
+        de.prompt_session.prompt.assert_any_call("[Ctx: 10%] 12:34:56 🔵 You> ")
