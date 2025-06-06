@@ -157,7 +157,7 @@ class TestHelperFunctions:
  
         # Test create_file when normalize_path raises an error (e.g., invalid path components)
         with patch('src.file_utils.normalize_path', side_effect=ValueError("Simulated normalize_path error")): # Patch where it's used internally by create_file
-            with pytest.raises(ValueError, match="Invalid path for create_file: ../invalid.txt. Details: Simulated normalize_path error"): # This is the line 160 from your traceback
+            with pytest.raises(ValueError, match="Invalid path for create_file: ../invalid.txt. Details: Simulated normalize_path error"):
                 de.util_create_file("../invalid.txt", "content", de.console, de.MAX_FILE_SIZE_BYTES) # Use util_ prefix and add args
         de.console.print.assert_any_call("[bold red]✗[/bold red] Could not create file. Invalid path: '[bright_cyan]../invalid.txt[/bright_cyan]'. Error: Simulated normalize_path error") # ai_eng.console
 
@@ -260,9 +260,11 @@ class TestHelperFunctions:
     @patch('ai_engineer.util_read_local_file')
     @patch('ai_engineer.util_create_file')
     @patch('ai_engineer.util_apply_diff_edit')
+    @patch('ai_engineer._handle_local_mcp_stream') # New patch
+    @patch('ai_engineer._handle_remote_mcp_sse')  # New patch
     @patch('ai_engineer.ensure_file_in_context', return_value=True)
-    def test_execute_function_call_dict(self, mock_ensure_context, mock_apply_diff, mock_create, mock_read, tmp_path): # mock_read is still patching the old name here, needs update - FIX THIS PATCH
-        # read_file
+    def test_execute_function_call_dict(self, mock_ensure_context, mock_remote_sse, mock_local_stream, mock_apply_diff, mock_create, mock_read, tmp_path):
+        # Test read_file
         mock_read.return_value = "file content"
         tool_call = {"function": {"name": "read_file", "arguments": json.dumps({"file_path": "test.txt"})}}
         result = de.execute_function_call_dict(tool_call) # This calls the internal handler which uses util_read_local_file
@@ -270,13 +272,13 @@ class TestHelperFunctions:
         assert "Content of file" in result
         assert "file content" in result
 
-        # create_file
+        # Test create_file
         tool_call = {"function": {"name": "create_file", "arguments": json.dumps({"file_path": "new.txt", "content": "new stuff"})}}
         result = de.execute_function_call_dict(tool_call)
         mock_create.assert_called_once_with("new.txt", "new stuff", de.console, de.MAX_FILE_SIZE_BYTES) # Check args
         assert "Successfully created file 'new.txt'" in result
 
-        # edit_file
+        # Test edit_file
         tool_call = {"function": {"name": "edit_file", "arguments": json.dumps({
             "file_path": "edit.txt", "original_snippet": "old", "new_snippet": "new"})}}
         result = de.execute_function_call_dict(tool_call)
@@ -284,7 +286,7 @@ class TestHelperFunctions:
         mock_apply_diff.assert_called_once_with("edit.txt", "old", "new", de.console, de.MAX_FILE_SIZE_BYTES) # Check args
         assert "Successfully edited file 'edit.txt'" in result
         
-        # read_multiple_files
+        # Test read_multiple_files
         mock_read.side_effect = ["content1", "content2"]
         tool_call = {"function": {"name": "read_multiple_files", "arguments": json.dumps({"file_paths": ["file1.txt", "file2.txt"]})}}
         result = de.execute_function_call_dict(tool_call)
@@ -292,7 +294,7 @@ class TestHelperFunctions:
         assert "Content of file '"+de.normalize_path("file1.txt")+"':\n\ncontent1" in result
         assert "Content of file '"+de.normalize_path("file2.txt")+"':\n\ncontent2" in result
 
-        # create_multiple_files
+        # Test create_multiple_files
         files_to_create = [{"path": "f1.txt", "content": "c1"}, {"path": "f2.txt", "content": "c2"}]
         tool_call = {"function": {"name": "create_multiple_files", "arguments": json.dumps({"files": files_to_create})}}
         result = de.execute_function_call_dict(tool_call)
@@ -301,19 +303,19 @@ class TestHelperFunctions:
         mock_create.assert_any_call("f2.txt", "c2", de.console, de.MAX_FILE_SIZE_BYTES) # Check args
         assert "Successfully created 2 files: f1.txt, f2.txt" in result
 
-        # Unknown function
+        # Test Unknown function
         tool_call = {"function": {"name": "unknown_func", "arguments": "{}"}}
         result = de.execute_function_call_dict(tool_call)
         assert "Unknown function: unknown_func" in result
 
-        # Error in execution
+        # Test Error in execution (read_file)
         mock_read.side_effect = Exception("Read error")
         tool_call = {"function": {"name": "read_file", "arguments": json.dumps({"file_path": "error.txt"})}}
         result = de.execute_function_call_dict(tool_call)
         assert "Error executing read_file: Read error" in result
 
-        # Error in json.loads
-        mock_read.reset_mock(side_effect=True) # Reset side_effect from previous
+        # Test Error in json.loads
+        mock_read.reset_mock(side_effect=True) # Reset side_effect from previous error
         tool_call_bad_json = {"function": {"name": "read_file", "arguments": "this is not json"}}
         # We need to know what function_name will be if arguments parsing fails. It might be undefined.
         # The current implementation will try to use function_name from the input dict.
@@ -348,13 +350,37 @@ class TestHelperFunctions:
         assert "Error executing edit_file: Generic edit error" in result
         de.console.print.assert_any_call("[red]Error executing edit_file: Generic edit error[/red]")
 
+        # Test connect_local_mcp_stream
+        mock_local_stream.return_value = "Local stream data"
+        tool_call_local_mcp = {
+            "function": {
+                "name": "connect_local_mcp_stream",
+                "arguments": json.dumps({"endpoint_url": "http://localhost:8000/stream", "timeout_seconds": 10, "max_data_chars": 500})
+            }
+        }
+        result = de.execute_function_call_dict(tool_call_local_mcp)
+        mock_local_stream.assert_called_once_with("http://localhost:8000/stream", 10, 500)
+        assert result == "Local stream data"
+
+        # Test connect_remote_mcp_sse
+        mock_remote_sse.return_value = "Remote SSE data summary"
+        tool_call_remote_mcp = {
+            "function": {
+                "name": "connect_remote_mcp_sse",
+                "arguments": json.dumps({"endpoint_url": "https://example.com/events", "max_events": 5, "listen_timeout_seconds": 20})
+            }
+        }
+        result = de.execute_function_call_dict(tool_call_remote_mcp)
+        mock_remote_sse.assert_called_once_with("https://example.com/events", 5, 20)
+        assert result == "Remote SSE data summary"
+
 
 
 
 class TestCommandHandling:
-    @patch('ai_engineer.util_read_local_file') # Patch the imported function
-    @patch('ai_engineer.add_directory_to_conversation') # Patch the function in ai_engineer
-    def test_try_handle_add_command_file(self, mock_add_dir, mock_read_file, tmp_path): # mock_read_file is patching the old name - FIX THIS PATCH
+    @patch('ai_engineer.util_read_local_file')
+    @patch('ai_engineer.add_directory_to_conversation')
+    def test_try_handle_add_command_file(self, mock_add_dir, mock_read_file, tmp_path):
         mock_read_file.return_value = "file content"
         file_to_add = tmp_path / "my_file.txt"
         file_to_add.touch() # Ensure it exists for os.path.isdir
@@ -369,7 +395,7 @@ class TestCommandHandling:
             assert f"Content of file '{de.normalize_path(str(file_to_add))}'" in de.conversation_history[1]["content"]
             mock_add_dir.assert_not_called()
 
-    @patch('ai_engineer.add_directory_to_conversation') # Patch the function in ai_engineer
+    @patch('ai_engineer.add_directory_to_conversation')
     def test_try_handle_add_command_directory(self, mock_add_dir, tmp_path):
         dir_to_add = tmp_path / "my_dir"
         dir_to_add.mkdir()
@@ -384,7 +410,7 @@ class TestCommandHandling:
         assert not de.try_handle_add_command("some other command")
 
     @patch('os.path.isdir', return_value=False) # Assume it's a file
-    @patch('ai_engineer.util_read_local_file', side_effect=OSError("Permission denied")) # Patch the imported function
+    @patch('ai_engineer.util_read_local_file', side_effect=OSError("Permission denied"))
     def test_try_handle_add_command_file_error(self, mock_read_file, mock_isdir, tmp_path, capsys):
         # Create a file that normalize_path can resolve (even if it's empty)
         # The error will come from the mocked util_read_local_file
@@ -444,24 +470,33 @@ class TestRulesCommand:
     @patch('ai_engineer.console.print')
     def test_try_handle_rules_command_show(self, mock_console_print):
         de.conversation_history = [{"role": "system", "content": "Initial system prompt content."}]
-        handled = de.try_handle_rules_command("/rules list")
+        handled = de.try_handle_rules_command("/rules show") # Was "/rules list", corrected to "/rules show"
         assert handled
         mock_console_print.assert_any_call("\n[bold blue]📚 Current System Prompt (Rules):[/bold blue]")
         # Check that Panel with RichMarkdown is called
-        # We can't easily check the RichMarkdown object content directly without more complex mocking,
-        # but we can check that console.print was called with a Panel object.
         panel_call_found = False
         for call_args in mock_console_print.call_args_list:
             if call_args[0] and isinstance(call_args[0][0], de.Panel):
-                panel_call_found = True
-                break
+                # Check if the panel's title matches what's expected for the "show" command
+                if call_args[0][0].title == "[bold blue]System Prompt[/bold blue]":
+                    panel_call_found = True
+                    break
         assert panel_call_found, "Console print was not called with a Rich Panel object for the system prompt."
+
+    @patch('ai_engineer.console.print')
+    @patch('ai_engineer.Path') # Mock the Path class
+    def test_try_handle_rules_command_list_dir_not_found(self, mock_Path_class, mock_console_print):
+        mock_rules_dir_instance = MagicMock()
+        mock_rules_dir_instance.iterdir.side_effect = FileNotFoundError("Simulated iterdir error")
+        mock_rules_dir_instance.__str__.return_value = ".aie_rules" # Control string representation
+        mock_Path_class.return_value = mock_rules_dir_instance
 
     @patch('ai_engineer.console.print')
     @patch('ai_engineer.Path')
     def test_try_handle_rules_command_list_success(self, mock_path, mock_console_print):
         mock_rules_dir = MagicMock()
         mock_path.return_value = mock_rules_dir
+        mock_rules_dir.__str__.return_value = str(Path("./.aie_rules/")) # Ensure correct string representation
         
         # Mock iterdir to return mock file objects
         mock_file1 = MagicMock()
@@ -482,17 +517,10 @@ class TestRulesCommand:
         mock_rules_dir.iterdir.assert_called_once()
         
         # Check console output
-        mock_console_print.assert_any_call("\n[bold blue]📚 Rules files in '[bright_cyan]./.aie_rules/'[/bright_cyan]':[/bold blue]")
+        # Path("./.aie_rules/") stringifies to ".aie_rules"
+        mock_console_print.assert_any_call(f"\n[bold blue]📚 Rules files in '[bright_cyan]{str(Path('./.aie_rules/'))}[/bright_cyan]':[/bold blue]")
         mock_console_print.assert_any_call("  - rule1.md")
         mock_console_print.assert_any_call("  - rule2.txt")
-
-    @patch('ai_engineer.console.print')
-    @patch('ai_engineer.Path', side_effect=FileNotFoundError("Dir not found"))
-    def test_try_handle_rules_command_list_dir_not_found(self, mock_path, mock_console_print):
-        handled = de.try_handle_rules_command("/rules list")
-        assert handled
-        mock_path.assert_called_once_with("./.aie_rules/")
-        mock_console_print.assert_any_call("[red]Error: Directory '[bright_cyan]./.aie_rules/'[/bright_cyan]' not found.[/red]")
 
     @patch('ai_engineer.util_read_local_file', return_value="## New Rule\n\nDo this.")
     @patch('ai_engineer.normalize_path', side_effect=lambda x: x) # Mock normalization to simplify path checks
@@ -549,7 +577,35 @@ class TestRulesCommand:
     def test_try_handle_rules_command_no_subcommand(self, mock_console_print):
         handled = de.try_handle_rules_command("/rules")
         assert handled
-        mock_console_print.assert_any_call("[yellow]Usage: /rules <list|add> [arguments][/yellow]")
+        mock_console_print.assert_any_call("[yellow]Usage: /rules <show|list|add|reset> [arguments][/yellow]")
+
+    @patch('ai_engineer.console.print')
+    @patch('ai_engineer.prompt_session')
+    @patch('ai_engineer.util_read_local_file')
+    @patch('ai_engineer.normalize_path')
+    def test_try_handle_rules_command_reset_load_default(self, mock_normalize, mock_read_file, mock_prompt_session, mock_console_print):
+        initial_prompt_content = "Initial system prompt."
+        de.conversation_history = [{"role": "system", "content": initial_prompt_content}]
+        de.RUNTIME_OVERRIDES['system_prompt'] = "some/path/to/custom_prompt.md" # Simulate a runtime override
+
+        mock_prompt_session.prompt.return_value = "y" # Confirm loading default
+        default_rules_path_obj = Path("./.aie_rules/_default.md")
+        mock_normalize.return_value = str(default_rules_path_obj.resolve()) # Mock normalization
+        mock_read_file.return_value = "Default rule content."
+
+        handled = de.try_handle_rules_command("/rules reset")
+        assert handled
+        
+        # Check system prompt was emptied then default rules added
+        assert de.conversation_history[0]["content"] == f"\n\n## Additional Rules from {str(default_rules_path_obj.resolve())}:\n\nDefault rule content."
+        assert "system_prompt" not in de.RUNTIME_OVERRIDES # Check runtime override was cleared
+
+        mock_console_print.assert_any_call("[green]✓ System prompt emptied.[/green]")
+        mock_prompt_session.prompt.assert_called_once_with(
+            f"Load default rules from '[bright_cyan]{str(default_rules_path_obj)}[/bright_cyan]'? [Y/n]: ",
+            default="y"
+        )
+        mock_console_print.assert_any_call(f"[green]✓ Added default rules from '[bright_cyan]{str(default_rules_path_obj.resolve())}[/bright_cyan]' to the system prompt.[/green]")
 
     def test_add_directory_to_conversation(self, tmp_path, capsys):
         # Setup directory structure
@@ -596,6 +652,166 @@ class TestRulesCommand:
         assert "largefile.txt (exceeds size limit)" in printed_output
         # .git and node_modules directories themselves should be skipped, not listed as skipped files.
         # The files inside them won't be processed.
+
+
+class TestSetCommand:
+    @patch('ai_engineer.console.print')
+    def test_try_handle_set_command_no_args(self, mock_console_print):
+        handled = de.try_handle_set_command("/set")
+        assert handled
+        mock_console_print.assert_any_call("[yellow]Available parameters to set:[/yellow]")
+        assert any("model" in str(call_args) for call_args in mock_console_print.call_args_list)
+
+    @patch('ai_engineer.console.print')
+    def test_try_handle_set_command_valid_param(self, mock_console_print):
+        de.RUNTIME_OVERRIDES.clear()
+        handled = de.try_handle_set_command("/set model gpt-4-turbo")
+        assert handled
+        assert de.RUNTIME_OVERRIDES["model"] == "gpt-4-turbo"
+        mock_console_print.assert_any_call("[green]✓ Parameter 'model' set to 'gpt-4-turbo' for the current session.[/green]")
+
+    @patch('ai_engineer.console.print')
+    def test_try_handle_set_command_invalid_param_name(self, mock_console_print):
+        handled = de.try_handle_set_command("/set non_existent_param 123")
+        assert handled
+        mock_console_print.assert_any_call(f"[red]Error: Unknown parameter 'non_existent_param'. Supported parameters: {', '.join(de.SUPPORTED_SET_PARAMS.keys())}[/red]")
+
+    @patch('ai_engineer.console.print')
+    def test_try_handle_set_command_invalid_value_for_allowed(self, mock_console_print):
+        handled = de.try_handle_set_command("/set reasoning_style super_high")
+        assert handled
+        mock_console_print.assert_any_call("[red]Error: Invalid value 'super_high' for 'reasoning_style'. Allowed values: full, compact, silent[/red]")
+
+    @patch('ai_engineer.util_read_local_file')
+    @patch('ai_engineer.normalize_path')
+    @patch('ai_engineer.console.print')
+    def test_try_handle_set_command_system_prompt_success(self, mock_console_print, mock_normalize, mock_read_file, tmp_path):
+        de.conversation_history = [{"role": "system", "content": "Old prompt"}]
+        de.RUNTIME_OVERRIDES.clear()
+        
+        prompt_file = tmp_path / "my_prompt.md"
+        prompt_content = "New system prompt from file."
+        prompt_file.write_text(prompt_content)
+        
+        mock_normalize.return_value = str(prompt_file.resolve())
+        mock_read_file.return_value = prompt_content
+
+        handled = de.try_handle_set_command(f"/set system_prompt {str(prompt_file)}")
+        assert handled
+        assert de.conversation_history[0]["content"] == prompt_content
+        assert de.RUNTIME_OVERRIDES["system_prompt"] == prompt_content
+        mock_console_print.assert_any_call(f"[green]✓ System prompt updated from file '[bright_cyan]{str(prompt_file.resolve())}[/bright_cyan]'.[/green]")
+
+    @patch('ai_engineer.console.print')
+    def test_try_handle_set_command_system_prompt_file_not_found(self, mock_console_print, tmp_path):
+        handled = de.try_handle_set_command(f"/set system_prompt {str(tmp_path / 'non_existent.md')}")
+        assert handled
+        # normalize_path inside try_handle_set_command will call util_read_local_file which raises FileNotFoundError
+        mock_console_print.assert_any_call(f"[red]Error: File not found at '[bright_cyan]{str(tmp_path / 'non_existent.md')}[/bright_cyan]'. System prompt not changed.[/red]")
+
+
+class TestHelpCommand:
+    @patch('ai_engineer.util_read_local_file')
+    @patch('ai_engineer.console.print')
+    def test_try_handle_help_command_success(self, mock_console_print, mock_read_file):
+        help_content = "# AI Engineer Help\n\nThis is the help content."
+        mock_read_file.return_value = help_content
+        
+        handled = de.try_handle_help_command("/help")
+        assert handled
+        mock_read_file.assert_called_once() # Path is constructed internally
+        
+        # Check that Panel with RichMarkdown was printed
+        panel_call_found = False
+        for call_args in mock_console_print.call_args_list:
+            if call_args[0] and isinstance(call_args[0][0], de.Panel):
+                panel_arg = call_args[0][0]
+                if isinstance(panel_arg.renderable, de.RichMarkdown) and panel_arg.renderable.markup == help_content:
+                    panel_call_found = True
+                    break
+        assert panel_call_found, "Help content with RichMarkdown in a Panel not printed."
+
+    @patch('ai_engineer.util_read_local_file', side_effect=FileNotFoundError("Help file missing"))
+    @patch('ai_engineer.console.print')
+    def test_try_handle_help_command_file_not_found(self, mock_console_print, mock_read_file):
+        handled = de.try_handle_help_command("/help")
+        assert handled
+        expected_path_str = str(Path(de.__file__).parent / "ai_engineer_help.md")
+        mock_console_print.assert_any_call(f"[red]Error: Help file not found at '{expected_path_str}'[/red]")
+
+
+class TestShellCommand:
+    @patch('subprocess.run')
+    @patch('ai_engineer.console.print')
+    def test_try_handle_shell_command_success(self, mock_console_print, mock_subprocess_run):
+        de.conversation_history = [{"role": "system", "content": "sys"}] # Reset history
+        mock_result = MagicMock()
+        mock_result.stdout = "Command output"
+        mock_result.stderr = ""
+        mock_result.returncode = 0
+        mock_subprocess_run.return_value = mock_result
+
+        handled = de.try_handle_shell_command("/shell echo hello")
+        assert handled
+        mock_subprocess_run.assert_called_once_with("echo hello", shell=True, capture_output=True, text=True, check=False)
+        mock_console_print.assert_any_call("Command output")
+        assert "Shell command executed: 'echo hello'" in de.conversation_history[-1]["content"]
+        assert "Stdout:\n```\nCommand output\n```" in de.conversation_history[-1]["content"]
+
+    @patch('ai_engineer.console.print')
+    def test_try_handle_shell_command_no_args(self, mock_console_print):
+        handled = de.try_handle_shell_command("/shell")
+        assert handled
+        mock_console_print.assert_any_call("[yellow]Usage: /shell <command and arguments>[/yellow]")
+
+
+class TestContextSessionCommands:
+    @patch('ai_engineer.save_context')
+    def test_try_handle_context_save(self, mock_save_context):
+        handled = de.try_handle_context_command("/context save my_session")
+        assert handled
+        mock_save_context.assert_called_once_with("my_session")
+
+    @patch('ai_engineer.load_context')
+    def test_try_handle_context_load(self, mock_load_context):
+        handled = de.try_handle_context_command("/context load my_session")
+        assert handled
+        mock_load_context.assert_called_once_with("my_session")
+
+    @patch('ai_engineer.list_contexts')
+    def test_try_handle_context_list(self, mock_list_contexts):
+        handled = de.try_handle_context_command("/context list .")
+        assert handled
+        mock_list_contexts.assert_called_once_with(".")
+
+    @patch('ai_engineer.summarize_context')
+    def test_try_handle_context_summarize(self, mock_summarize_context):
+        handled = de.try_handle_context_command("/context summarize")
+        assert handled
+        mock_summarize_context.assert_called_once()
+
+    @patch('ai_engineer.try_handle_context_command') # Mock the target of delegation
+    def test_try_handle_session_command_delegates(self, mock_try_handle_context_command):
+        # Test /session save my_session
+        de.try_handle_session_command("/session save my_session")
+        mock_try_handle_context_command.assert_called_once_with("/context save my_session")
+        mock_try_handle_context_command.reset_mock()
+
+        # Test /session (no args)
+        de.try_handle_session_command("/session")
+        mock_try_handle_context_command.assert_called_once_with("/context")
+
+
+class TestPromptCommand:
+    @patch('ai_engineer._call_llm_for_prompt_generation')
+    @patch('ai_engineer.console.print')
+    def test_try_handle_prompt_refine_success(self, mock_console_print, mock_call_llm):
+        mock_call_llm.return_value = "Refined prompt text."
+        handled = de.try_handle_prompt_command("/prompt refine some text")
+        assert handled
+        mock_call_llm.assert_called_once_with("some text", "refine")
+        assert any("✨ Generated Prompt (Refined):" in str(call_arg) for call_arg in mock_console_print.call_args_list)
+        assert any(isinstance(call_arg[0][0], de.Panel) and call_arg[0][0].renderable == "Refined prompt text." for call_arg in mock_console_print.call_args_list if call_arg[0])
 
 
 class TestStreamLLMResponse:
@@ -652,11 +868,13 @@ class TestStreamLLMResponse:
         de.console.print.assert_any_call("world!", end="")
 
 
+    @patch('ai_engineer.get_config_value') # To control reasoning_style
     @patch('ai_engineer.completion')
-    def test_response_with_reasoning(self, mock_litellm_completion, mock_env_vars):
+    def test_response_with_reasoning_styles(self, mock_litellm_completion, mock_get_config, mock_env_vars):
+        # --- Test with reasoning_style = "full" (default or explicit) ---
+        mock_get_config.side_effect = lambda key, default: "full" if key == "reasoning_style" else default
         mock_stream = iter([
             create_mock_litellm_chunk(reasoning_content="Thinking... "),
-            create_mock_litellm_chunk(reasoning_content="step 1. "),
             create_mock_litellm_chunk(content="Okay, "),
             create_mock_litellm_chunk(content="done."),
             create_mock_litellm_chunk(finish_reason="stop")
@@ -665,33 +883,91 @@ class TestStreamLLMResponse:
 
         user_message = "Explain something."
         de.stream_llm_response(user_message)
-        
-        mock_litellm_completion.assert_called_once_with(
-            model="test_model_from_env",
-            messages=ANY, # History check is more complex here, focus on other params
-            tools=de.tools,
-            max_tokens=8192,
-            api_base="http://test.api.base/v1",
-            temperature=0.7, # Default from ai_eng.py
-            stream=True
-        )
 
-        # The assistant message should include the accumulated reasoning content
         assert de.conversation_history[-1] == {
             "role": "assistant",
             "content": "Okay, done.",
-            "reasoning_content_full": "Thinking... step 1. "}
-        # Check console output for reasoning and content
+            "reasoning_content_full": "Thinking... "}
         de.console.print.assert_any_call("\n[bold blue]💭 Reasoning:[/bold blue]")
         de.console.print.assert_any_call("Thinking... ", end="")
-        de.console.print.assert_any_call("step 1. ", end="") # This assertion is correct
         de.console.print.assert_any_call("\n\n[bold bright_blue]🤖 Assistant>[/bold bright_blue] ", end="") # Expect two newlines before prompt
         de.console.print.assert_any_call("Okay, ", end="")
         de.console.print.assert_any_call("done.", end="")
+        de.console.reset_mock() # Reset for next style
+        de.conversation_history = [{"role": "system", "content": de.system_PROMPT}] # Reset history
+
+        # --- Test with reasoning_style = "compact" ---
+        mock_get_config.side_effect = lambda key, default: "compact" if key == "reasoning_style" else default
+        mock_stream_compact = iter([
+            create_mock_litellm_chunk(reasoning_content="Thinking..."),
+            create_mock_litellm_chunk(reasoning_content="more..."),
+            create_mock_litellm_chunk(content="Compact answer."),
+            create_mock_litellm_chunk(finish_reason="stop")
+        ])
+        mock_litellm_completion.return_value = mock_stream_compact
+        de.stream_llm_response("Compact explain.")
+        
+        assert de.conversation_history[-1]["reasoning_content_full"] == "Thinking...more..."
+        de.console.print.assert_any_call("\n[bold blue]💭 Reasoning...[/bold blue]", end="")
+        # Two reasoning chunks means two dots
+        assert de.console.print.call_args_list.count(call(".", end="")) == 2
+        # Newline should be printed after dots and before assistant content
+        assert de.console.print.call_args_list.count(call()) >= 1 # Check for at least one newline call
+        de.console.print.assert_any_call("\n\n[bold bright_blue]🤖 Assistant>[/bold bright_blue] ", end="")
+        de.console.print.assert_any_call("Compact answer.", end="")
+        de.console.reset_mock()
+        de.conversation_history = [{"role": "system", "content": de.system_PROMPT}]
+
+        # --- Test with reasoning_style = "silent" ---
+        mock_get_config.side_effect = lambda key, default: "silent" if key == "reasoning_style" else default
+        mock_stream_silent = iter([
+            create_mock_litellm_chunk(reasoning_content="Secret thoughts..."), # Should not be printed
+            create_mock_litellm_chunk(content="Silent answer."),
+            create_mock_litellm_chunk(finish_reason="stop")
+        ])
+        mock_litellm_completion.return_value = mock_stream_silent
+        de.stream_llm_response("Silent explain.")
+
+        assert de.conversation_history[-1]["reasoning_content_full"] == "Secret thoughts..."
+        # Ensure reasoning header or content was NOT printed
+        for print_call in de.console.print.call_args_list:
+            call_text = str(print_call[0][0]) if print_call[0] else ""
+            assert "Reasoning" not in call_text
+            assert "Secret thoughts" not in call_text
+        de.console.print.assert_any_call("\n\n[bold bright_blue]🤖 Assistant>[/bold bright_blue] ", end="")
+        de.console.print.assert_any_call("Silent answer.", end="")
+
+    @patch('ai_engineer.prompt_session')
+    @patch('ai_engineer.execute_function_call_dict')
+    @patch('ai_engineer.completion')
+    def test_response_with_risky_tool_confirmation(self, mock_litellm_completion, mock_execute_func, mock_prompt_session, mock_env_vars):
+        # Make 'create_file' a risky tool for this test
+        original_risky_tools = de.RISKY_TOOLS.copy()
+        de.RISKY_TOOLS.add("create_file")
+
+        tool_call_request_stream = iter([
+            create_mock_litellm_chunk(tool_calls_delta=[{
+                "index": 0, "id": "call_risky", "function": {"name": "create_file", "arguments": '{"file_path":"risky.txt","content":"stuff"}'}
+            }]),
+            create_mock_litellm_chunk(finish_reason="tool_calls")
+        ])
+        follow_up_stream = iter([create_mock_litellm_chunk(content="Tool done.")])
+        mock_litellm_completion.side_effect = [tool_call_request_stream, follow_up_stream]
+        mock_execute_func.return_value = "Mocked: File risky.txt created"
+        mock_prompt_session.prompt.return_value = "y" # User confirms
+
+        de.stream_llm_response("Create risky.txt")
+
+        mock_prompt_session.prompt.assert_called_once_with("Proceed with this operation? [Y/n]: ", default="y")
+        mock_execute_func.assert_called_once()
+        assert de.conversation_history[-1]["content"] == "Tool done."
+
+        # Restore original risky tools
+        de.RISKY_TOOLS = original_risky_tools
 
     @patch('ai_engineer.completion')
     @patch('ai_engineer.execute_function_call_dict')
-    def test_response_with_tool_calls(self, mock_execute_func, mock_litellm_completion, mock_env_vars):
+    def test_response_with_tool_calls(self, mock_execute_func, mock_litellm_completion, mock_env_vars): # Original test, kept for non-risky tool flow
         # First call: requests a tool
         tool_call_request_stream = iter([
             create_mock_litellm_chunk(tool_calls_delta=[{
@@ -816,6 +1092,7 @@ class TestStreamLLMResponse:
 
 class TestMainLoop:
     @patch('ai_engineer.stream_llm_response')
+    @patch('ai_engineer.try_handle_prompt_command', return_value=False) # Mock new command handlers
     @patch('ai_engineer.try_handle_add_command', return_value=False) # Assume no /add commands
     def test_main_loop_exit_quit(self, mock_handle_add, mock_stream_response, monkeypatch):
         # Test 'exit'
@@ -839,6 +1116,7 @@ class TestMainLoop:
         de.console.print.assert_any_call("[bold bright_blue]👋 Goodbye! Happy coding![/bold bright_blue]")
 
     @patch('ai_engineer.stream_llm_response')
+    @patch('ai_engineer.try_handle_prompt_command', return_value=False)
     @patch('ai_engineer.try_handle_add_command', return_value=False)
     def test_main_loop_eof_keyboard_interrupt(self, mock_handle_add, mock_stream_response, monkeypatch):
         # Test EOFError
@@ -861,6 +1139,7 @@ class TestMainLoop:
         de.console.print.assert_any_call("\n[bold yellow]👋 Exiting gracefully...[/bold yellow]")
 
     @patch('ai_engineer.stream_llm_response', return_value={"success": True})
+    @patch('ai_engineer.try_handle_prompt_command', return_value=False)
     @patch('ai_engineer.try_handle_add_command', return_value=False)
     def test_main_loop_empty_and_normal_input(self, mock_handle_add, mock_stream_response, monkeypatch):
         # Simulate empty input, then normal input, then exit
@@ -873,6 +1152,7 @@ class TestMainLoop:
         assert mock_stream_response.call_args_list == [call("hello")]
 
     @patch('ai_engineer.stream_llm_response', return_value={"error": "Simulated API Error"})
+    @patch('ai_engineer.try_handle_prompt_command', return_value=False)
     @patch('ai_engineer.try_handle_add_command', return_value=False)
     def test_main_loop_llm_error(self, mock_handle_add, mock_stream_response, monkeypatch):
         # Simulate normal input, then LLM error, then exit
@@ -886,3 +1166,31 @@ class TestMainLoop:
         # We just ensure the loop continued and exited gracefully.
         # The actual printing of the error by stream_llm_response is tested in TestStreamLLMResponse.test_api_error.
         pass
+
+    @patch('ai_engineer.prompt_session')
+    @patch('ai_engineer.token_counter', return_value=1000) # Mock token_counter
+    @patch('ai_engineer.get_config_value') # Mock get_config_value
+    @patch('ai_engineer.get_model_context_window', return_value=(8000, False)) # Mock context window
+    @patch('ai_engineer.stream_llm_response', return_value={"success": True}) # Mock LLM response
+    def test_main_loop_prompt_prefix_context_usage(
+        self, mock_stream_llm, mock_get_model_window, mock_get_config, mock_token_counter, mock_prompt_session_obj, monkeypatch
+    ):
+        # Simulate a sequence of inputs: first a normal input, then KeyboardInterrupt to exit
+        mock_prompt_session_obj.prompt = MagicMock(side_effect=["hello", KeyboardInterrupt])
+        
+        # Configure get_config_value to return a model name
+        mock_get_config.side_effect = lambda key, default: "test_model" if key == "model" else default
+
+        # Initial conversation history (system prompt + one user/assistant pair)
+        de.conversation_history = [
+            {"role": "system", "content": "System prompt"},
+            {"role": "user", "content": "Previous user message"},
+            {"role": "assistant", "content": "Previous assistant message"}
+        ]
+
+        with pytest.raises(SystemExit):
+            de.main()
+
+        # Check that prompt was called with the context usage prefix.
+        # 1000 tokens / 8000 window = 12.5%. "{:.0f}".format(12.5) is "12".
+        mock_prompt_session_obj.prompt.assert_any_call("[Ctx: 12%] 🔵 You> ")

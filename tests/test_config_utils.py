@@ -21,7 +21,8 @@ def reset_config_globals_and_env(monkeypatch):
     
     # Clear any environment variables that might interfere with tests
     for param_name, p_config in config_utils.SUPPORTED_SET_PARAMS.items():
-        if p_config["env_var"] in os.environ:
+        # Check if 'env_var' key exists for the parameter before trying to access it
+        if "env_var" in p_config and p_config["env_var"] in os.environ:
             monkeypatch.delenv(p_config["env_var"])
     if "AI_API_KEY" in os.environ: # Example of another common env var
         monkeypatch.delenv("AI_API_KEY")
@@ -249,3 +250,59 @@ class TestGetConfigValue:
     def test_get_config_value_no_param_in_supported_set_params(self, mock_console):
         with pytest.raises(KeyError):
             config_utils.get_config_value("non_existent_param", "default", mock_console)
+
+
+class TestGetModelContextWindow:
+
+    def test_get_model_context_window_exact_match(self):
+        # Test exact match
+        model_name = "gpt-4o"
+        expected_window = config_utils.MODEL_CONTEXT_WINDOWS[model_name]
+        assert config_utils.get_model_context_window(model_name) == expected_window
+        
+        # Test with return_match_status
+        window, used_default = config_utils.get_model_context_window(model_name, return_match_status=True)
+        assert window == expected_window
+        assert not used_default
+
+    def test_get_model_context_window_prefix_match(self):
+        # Test prefix match (e.g., "gpt-4-turbo-2024-04-09" should match "gpt-4-turbo")
+        # Add a more specific key to ensure sorting works if "gpt-4-turbo" itself is a prefix of another.
+        # For this test, "gpt-4-turbo" is a good prefix.
+        model_name_with_suffix = "gpt-4-turbo-preview"
+        # Assuming "gpt-4-turbo" is in MODEL_CONTEXT_WINDOWS and is the longest prefix match
+        expected_window = config_utils.MODEL_CONTEXT_WINDOWS["gpt-4-turbo"]
+        
+        assert config_utils.get_model_context_window(model_name_with_suffix) == expected_window
+        
+        # Test with return_match_status
+        window, used_default = config_utils.get_model_context_window(model_name_with_suffix, return_match_status=True)
+        assert window == expected_window
+        assert not used_default
+
+    def test_get_model_context_window_no_match_fallback(self):
+        # Test fallback to DEFAULT_CONTEXT_WINDOW when no match
+        model_name_no_match = "completely-unknown-model-v1"
+        expected_window = config_utils.DEFAULT_CONTEXT_WINDOW
+        
+        assert config_utils.get_model_context_window(model_name_no_match) == expected_window
+        
+        # Test with return_match_status
+        window, used_default = config_utils.get_model_context_window(model_name_no_match, return_match_status=True)
+        assert window == expected_window
+        assert used_default
+
+    def test_get_model_context_window_empty_model_name(self):
+        # Test with empty model name (lines 140-143)
+        expected_window = config_utils.DEFAULT_CONTEXT_WINDOW
+        
+        assert config_utils.get_model_context_window("") == expected_window
+        assert config_utils.get_model_context_window(None) == expected_window # Also test None
+        
+        # Test with return_match_status
+        window_empty, used_default_empty = config_utils.get_model_context_window("", return_match_status=True)
+        assert window_empty == expected_window
+        assert used_default_empty
+        window_none, used_default_none = config_utils.get_model_context_window(None, return_match_status=True)
+        assert window_none == expected_window
+        assert used_default_none

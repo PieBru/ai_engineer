@@ -40,6 +40,7 @@ You provide thoughtful, well-structured solutions while explaining your reasonin
    - read_multiple_files: Read multiple files at once.
    - create_file: Create or overwrite a single file.
    - create_multiple_files: Create multiple files at once.
+   - edit_file: Edit an existing file by replacing a specific snippet with new content. # Ensure full description
 3. Network Operations (via function calls):
    The following tools are available for network interactions:
    - connect_local_mcp_stream: Connects to a local (localhost or 127.0.0.1) MCP server endpoint that provides a streaming HTTP response. Returns the aggregated data from the stream.

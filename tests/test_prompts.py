@@ -21,7 +21,7 @@ def test_system_prompt_file_operations_tools():
     assert "read_multiple_files:" in system_PROMPT
     assert "create_file:" in system_PROMPT
     assert "create_multiple_files:" in system_PROMPT
-    assert "edit_file:" in system_PROMPT
+    assert "edit_file: Edit an existing file by replacing a specific snippet with new content." in system_PROMPT
 
 def test_system_prompt_network_operations_tools():
     """Verify that the prompt lists expected network operation tools."""
