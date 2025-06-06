@@ -19,6 +19,7 @@ from prompt_toolkit import PromptSession
 import time # For tool call IDs
 import subprocess # For /shell command
 import copy # For deepcopy
+from textwrap import dedent # For /prompt command meta-prompts
 import httpx # For new MCP tools
 # Removed: import tomllib # For reading TOML config (Python 3.11+) - now in config_utils.py
 
@@ -597,6 +598,74 @@ def summarize_context():
         console.print(f"[bold red]✗[/bold red] Failed to summarize context: {e}\n")
         # History remains unchanged on error
 
+def _call_llm_for_prompt_generation(user_text: str, mode: str) -> str:
+    """Helper function to call LLM for refining or detailing a prompt."""
+    console.print(f"[bold bright_blue]⚙️ Processing text for prompt {mode}ing...[/bold bright_blue]")
+
+    if mode == "refine":
+        meta_system_prompt = dedent(f"""\
+            You are a prompt engineering assistant. Your task is to refine the following user-provided text into an optimized prompt suitable for an AI coding assistant like AI Engineer. The refined prompt should be clear, concise, and actionable, guiding the AI to provide the best possible coding assistance.
+            The output should be ONLY the refined prompt text, without any preamble or explanation.
+            """)
+        user_query = f"Refine this text into a prompt for an AI coding assistant:\n\n---\n{user_text}\n---"
+    elif mode == "detail":
+        meta_system_prompt = dedent(f"""\
+            You are a prompt engineering assistant. Your task is to expand the following user-provided text into a more detailed and comprehensive prompt suitable for an AI coding assistant like AI Engineer. The detailed prompt should elaborate on the user's initial idea, adding necessary context, specifying desired outcomes, and anticipating potential ambiguities to guide the AI effectively.
+            The output should be ONLY the detailed prompt text, without any preamble or explanation.
+            """)
+        user_query = f"Expand this text into a detailed prompt for an AI coding assistant:\n\n---\n{user_text}\n---"
+    else:
+        return "Error: Invalid mode for prompt generation."
+
+    messages = [
+        {"role": "system", "content": meta_system_prompt},
+        {"role": "user", "content": user_query}
+    ]
+
+    try:
+        model_name = get_config_value("model", "gpt-4o") # Use a capable model
+        api_base_url = get_config_value("api_base", None)
+        max_tokens_val = get_config_value("max_tokens", 2048) # Allow decent length
+
+        response = completion(
+            model=model_name,
+            messages=messages,
+            temperature=0.5, # Balanced temperature
+            max_tokens=max_tokens_val,
+            api_base=api_base_url,
+            stream=False # Non-streaming for this helper
+        )
+        generated_prompt = response.choices[0].message.content.strip()
+        return generated_prompt
+    except Exception as e:
+        console.print(f"[bold red]✗[/bold red] Failed to generate prompt: {e}\n")
+        return ""
+
+def try_handle_prompt_command(user_input: str) -> bool:
+    """Handles /prompt <refine|detail> <text> commands."""
+    prefix = "/prompt "
+    stripped_input_lower = user_input.strip().lower()
+
+    if stripped_input_lower.startswith(prefix) or stripped_input_lower == "/prompt":
+        command_body = user_input.strip()[len(prefix):].strip() if stripped_input_lower.startswith(prefix) else ""
+        parts = command_body.split(maxsplit=1)
+        sub_command = parts[0].lower() if parts else ""
+        text_to_process = parts[1] if len(parts) > 1 else ""
+
+        if sub_command in ["refine", "detail"]:
+            if not text_to_process:
+                console.print(f"[yellow]Usage: /prompt {sub_command} <text_to_{sub_command}>[/yellow]")
+                return True
+            generated_prompt = _call_llm_for_prompt_generation(text_to_process, sub_command)
+            if generated_prompt:
+                console.print(f"\n[bold blue]✨ Generated Prompt ({sub_command.capitalize()}d):[/bold blue]")
+                console.print(Panel(generated_prompt, border_style="green", expand=True, title_align="left"))
+            return True
+        console.print("[yellow]Usage: /prompt <refine|detail> <text>[/yellow]")
+        console.print("[yellow]  refine <text>  - Optimizes <text> into a clearer and more effective prompt for AI Engineer.[/yellow]")
+        console.print("[yellow]  detail <text>  - Expands <text> into a more comprehensive and detailed prompt for AI Engineer.[/yellow]")
+        return True
+    return False
 
 def add_directory_to_conversation(directory_path: str):
     with console.status("[bold bright_blue]🔍 Scanning directory...[/bold bright_blue]") as status:
@@ -1212,10 +1281,11 @@ def main():
         context_window_display += " (default)"
 
     # Create an elegant instruction panel listing key commands
-    instructions = f"""[bold bright_blue]🎯 Commands:[/bold bright_blue]
+    instructions = f"""🧠 Model: [bold magenta]{current_model_name_for_display}[/bold magenta] ([dim]{context_window_display}[/dim])
+
+[bold bright_blue]🎯 Commands:[/bold bright_blue]
   • [bright_cyan]/exit[/bright_cyan] or [bright_cyan]/quit[/bright_cyan] - End the session.
   • [bright_cyan]/help[/bright_cyan] - Display detailed help.
-Model: [bold magenta]{current_model_name_for_display}[/bold magenta] ([dim]{context_window_display}[/dim])
 
 [bold white]👥 Just ask naturally, like you are communicating with a colleague.[/bold white]"""
 
@@ -1286,6 +1356,8 @@ Model: [bold magenta]{current_model_name_for_display}[/bold magenta] ([dim]{cont
         if try_handle_session_command(user_input): # New: session handler
             continue
         if try_handle_context_command(user_input):
+            continue
+        if try_handle_prompt_command(user_input): # New: prompt command handler
             continue
 
         # Use imported stream_llm_response

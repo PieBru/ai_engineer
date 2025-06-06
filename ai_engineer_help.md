@@ -1,23 +1,44 @@
  🎯 **Commands:**
-*   `/exit` or `/quit` - End the session.
-*   `/add [path/to/file_or_folder]` - Add file/folder to context.
-    *   Call `/add` without arguments for detailed usage.
-    *   The AI can automatically read and create files using function calls.
-*   `/set [parameter] [value]` - Change configuration for the current session.
-    *   Call `/set` without arguments to list available parameters and see usage.
-    *   Example: `/set reasoning_style compact`
-    *   Available: `model`, `api_base`, `reasoning_style`, `max_tokens`, `reasoning_effort`, `reply_effort`, `temperature`, `system_prompt`.
-    *   For `system_prompt`, the value should be a file path (e.g., `/set system_prompt ./my_custom_prompt.txt`).
-*   `/help` - Display this detailed help information.
-*   `/shell [command]` - Execute a shell command and add output to history.
-    *   Call `/shell` without arguments for usage.
-    *   Example: `/shell ls -l`
-*   `/context [subcommand] [name/path]` - Manage conversation context.
-    *   Call `/context` without arguments for detailed usage.
-    *   Subcommands:
-        *   `save <name>`     - Save current context to a file.
-        *   `load <name>`     - Load context from a file.
-        *   `list [path]`     - List saved contexts in a directory.
-        *   `summarize`       - Summarize current context using the LLM.
-*   `/session [...]` - Alias for `/context [...]`.
-*   **Just ask naturally** - The AI will handle file operations automatically!
+
+*   **`/exit`** or **`/quit`** - End the current session.
+
+*   **`/add`** `[path/to/file_or_folder]` - Add the content of a specific file or all files in a folder to the conversation context.
+    Call `/add` without arguments for detailed usage and examples.
+    *(Note: The AI can often read files automatically by mentioning them in your conversation.)*
+
+*   **`/set`** `[parameter] [value]` - Change configuration parameters for the current session.
+    Call `/set` without arguments to list available parameters and see usage.
+    Example: `/set model gpt-4o`
+    Available parameters:
+    - `model`: The language model to use.
+    - `api_base`: The API base URL for the LLM provider.
+    - `reasoning_style`: Controls display of AI's reasoning (`full`, `compact`, `silent`).
+    - `max_tokens`: Maximum number of tokens for the LLM response.
+    - `reasoning_effort`: Controls AI's internal thinking depth (`low`, `medium`, `high`).
+    - `reply_effort`: Controls verbosity of AI's final reply (`low`, `medium`, `high`).
+    - `temperature`: Controls randomness/creativity (0.0 to 2.0).
+    - `system_prompt`: Path to a file whose content will replace the current system prompt.
+
+*   **`/help`** - Display this detailed help information.
+
+*   **`/shell`** `[command]` - Execute a shell command and add its output to the conversation history.
+    Call `/shell` without arguments for usage and examples.
+    *(Warning: Executing arbitrary shell commands can be risky.)*
+
+*   **`/context`** `[subcommand] [name/path]` - Manage conversation context (save, load, list, summarize).
+    Call `/context` without arguments for detailed usage.
+    Subcommands:
+    - `save <name>`: Save current context to a file.
+    - `load <name>`: Load context from a file.
+    - `list [path]`: List saved contexts in a directory.
+    - `summarize`: Summarize current context using the LLM.
+
+*   **`/session`** `[...]` - Alias for the `/context` command.
+
+*   **`/prompt`** `<subcommand> <text>` - Tools to help craft better prompts for AI Engineer using the LLM.
+    Call `/prompt` without arguments for detailed usage.
+    Subcommands:
+    - `refine <text>`: Optimizes `<text>` into a clearer and more effective prompt.
+    - `detail <text>`: Expands `<text>` into a more comprehensive and detailed prompt.
+
+*   **Just ask naturally:** The AI will handle file operations automatically by mentioning files in your conversation.
