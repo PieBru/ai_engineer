@@ -91,6 +91,12 @@ SUPPORTED_SET_PARAMS = {
         "toml_key": "temperature",
         "default_value_key": "default_temperature",
         "description": "Controls the randomness/creativity of the response (0.0 to 2.0, lower is more deterministic)."
+    },
+    "system_prompt": {
+        # This is a special parameter. The /set command expects a file path.
+        # The content of the file is then read and stored in RUNTIME_OVERRIDES.
+        # It doesn't use env_var or toml_key for file path input in the same way as other params.
+        "description": "Path to a file whose content will replace the current system prompt."
     }
 }
 

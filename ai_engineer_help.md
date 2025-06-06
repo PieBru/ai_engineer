@@ -6,7 +6,8 @@
 *   `/set [parameter] [value]` - Change configuration for the current session.
     *   Call `/set` without arguments to list available parameters and see usage.
     *   Example: `/set reasoning_style compact`
-    *   Available: `model`, `api_base`, `reasoning_style`, `max_tokens`, `reasoning_effort`, `reply_effort`, `temperature`.
+    *   Available: `model`, `api_base`, `reasoning_style`, `max_tokens`, `reasoning_effort`, `reply_effort`, `temperature`, `system_prompt`.
+    *   For `system_prompt`, the value should be a file path (e.g., `/set system_prompt ./my_custom_prompt.txt`).
 *   `/help` - Display this detailed help information.
 *   `/shell [command]` - Execute a shell command and add output to history.
     *   Call `/shell` without arguments for usage.

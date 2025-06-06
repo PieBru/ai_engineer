@@ -234,6 +234,7 @@ def try_handle_set_command(user_input: str) -> bool:
     Handles the /set command to change configuration parameters at runtime.
     """
     prefix = "/set "
+    # Use imported SUPPORTED_SET_PARAMS
     command_name_lower = "/set"
     stripped_input_lower = user_input.strip().lower()
 
@@ -243,7 +244,6 @@ def try_handle_set_command(user_input: str) -> bool:
             command_body = user_input.strip()[len(prefix):].strip()
 
         if not command_body:
-            # Use imported SUPPORTED_SET_PARAMS
             console.print("[yellow]Available parameters to set:[/yellow]")
             for p_name, p_config in SUPPORTED_SET_PARAMS.items():
                 console.print(f"  [bright_cyan]{p_name}[/bright_cyan]: {p_config['description']}")
@@ -260,45 +260,62 @@ def try_handle_set_command(user_input: str) -> bool:
 
         param_name, value = command_parts[0].lower(), command_parts[1]
 
-        # Use imported SUPPORTED_SET_PARAMS
-        if param_name not in SUPPORTED_SET_PARAMS:
+        if param_name == "system_prompt":
+            file_path = value # value is the path from /set system_prompt <path>
+            try:
+                # Use imported normalize_path and util_read_local_file
+                normalized_path = normalize_path(file_path)
+                new_prompt_content = util_read_local_file(normalized_path)
+
+                if conversation_history and conversation_history[0]["role"] == "system":
+                    conversation_history[0]["content"] = new_prompt_content
+                else:
+                    # Should not happen if history is initialized correctly, but as a fallback:
+                    conversation_history.insert(0, {"role": "system", "content": new_prompt_content})
+
+                RUNTIME_OVERRIDES[param_name] = new_prompt_content # Store the actual content
+                console.print(f"[green]✓ System prompt updated from file '[bright_cyan]{normalized_path}[/bright_cyan]'.[/green]")
+            except FileNotFoundError:
+                console.print(f"[red]Error: File not found at '[bright_cyan]{file_path}[/bright_cyan]'. System prompt not changed.[/red]")
+            except (OSError, ValueError) as e: # ValueError from normalize_path or read errors
+                console.print(f"[red]Error reading or normalizing file '[bright_cyan]{file_path}[/bright_cyan]': {e}. System prompt not changed.[/red]")
+            return True # Command was handled, even if there was an error
+        elif param_name in SUPPORTED_SET_PARAMS:
+            param_config = SUPPORTED_SET_PARAMS[param_name]
+
+            if "allowed_values" in param_config and value.lower() not in param_config["allowed_values"]:
+                console.print(f"[red]Error: Invalid value '{value}' for '{param_name}'. Allowed values: {', '.join(param_config.get('allowed_values', []))}[/red]")
+                return True
+
+            # Type conversion and validation based on parameter
+            if param_name == "max_tokens":
+                try:
+                    int_value = int(value)
+                    if int_value <= 0:
+                        raise ValueError("max_tokens must be a positive integer.")
+                    value = int_value # Store as int
+                except ValueError:
+                    console.print(f"[red]Error: Invalid value '{value}' for 'max_tokens'. Must be a positive integer.[/red]")
+                    return True
+            elif param_name == "temperature":
+                try:
+                    float_value = float(value)
+                    if not (0.0 <= float_value <= 2.0): # Temperature is typically between 0.0 and 2.0
+                        raise ValueError("Temperature must be a float between 0.0 and 2.0.")
+                    value = float_value # Store as float
+                except ValueError as e:
+                    console.print(f"[red]Error: Invalid value '{value}' for 'temperature'. Must be a float between 0.0 and 2.0. Details: {e}[/red]")
+                    return True
+            # For other parameters (model, api_base, reasoning_style, reasoning_effort, reply_effort),
+            # the value can be stored as a string directly.
+
+            # If we reached here, the parameter is valid and value is potentially converted/validated
+            RUNTIME_OVERRIDES[param_name] = value
+            console.print(f"[green]✓ Parameter '{param_name}' set to '{value}' for the current session.[/green]")
+            return True
+        else: # Unknown parameter (not system_prompt and not in SUPPORTED_SET_PARAMS)
             console.print(f"[red]Error: Unknown parameter '{param_name}'. Supported parameters: {', '.join(SUPPORTED_SET_PARAMS.keys())}[/red]")
             return True
-
-        param_config = SUPPORTED_SET_PARAMS[param_name]
-
-        if "allowed_values" in param_config and value.lower() not in param_config["allowed_values"]:
-            # Use imported SUPPORTED_SET_PARAMS
-            console.print(f"[red]Error: Invalid value '{value}' for '{param_name}'. Allowed values: {', '.join(param_config['allowed_values'])}[/red]")
-            return True
-
-        # Type conversion and validation based on parameter
-        if param_name == "max_tokens":
-            try:
-                int_value = int(value)
-                if int_value <= 0:
-                    raise ValueError("max_tokens must be a positive integer.")
-                value = int_value # Store as int
-            except ValueError:
-                console.print(f"[red]Error: Invalid value '{value}' for 'max_tokens'. Must be a positive integer.[/red]")
-                return True
-        elif param_name == "temperature":
-            try:
-                float_value = float(value)
-                if not (0.0 <= float_value <= 2.0): # Temperature is typically between 0.0 and 2.0
-                    raise ValueError("Temperature must be a float between 0.0 and 2.0.")
-                value = float_value # Store as float
-            except ValueError as e:
-                console.print(f"[red]Error: Invalid value '{value}' for 'temperature'. Must be a float between 0.0 and 2.0. Details: {e}[/red]")
-                return True
-        # For other parameters (model, api_base, reasoning_style, reasoning_effort, reply_effort),
-        # the value can be stored as a string directly.
-
-        # Use imported RUNTIME_OVERRIDES
-        RUNTIME_OVERRIDES[param_name] = value
-        console.print(f"[green]✓ Parameter '{param_name}' set to '{value}' for the current session.[/green]")
-        return True
-    return False
 
 def try_handle_help_command(user_input: str) -> bool:
     """
@@ -1186,14 +1203,19 @@ def main():
     clear_screen()
     # Get the current model name to display in the welcome panel
     # Use the imported get_config_value function
-    current_model_name = get_config_value("model", "gpt-4o") # Default if not found
+    current_model_name_for_display = get_config_value("model", "gpt-4o") # Default if not found
+    # Get context window size for the current model
+    # Use imported get_model_context_window
+    context_window_size, used_default = get_model_context_window(current_model_name_for_display, return_match_status=True)
+    context_window_display = f"{context_window_size // 1000}k tokens" # e.g. "128k tokens"
+    if used_default:
+        context_window_display += " (default)"
 
     # Create an elegant instruction panel listing key commands
     instructions = f"""[bold bright_blue]🎯 Commands:[/bold bright_blue]
   • [bright_cyan]/exit[/bright_cyan] or [bright_cyan]/quit[/bright_cyan] - End the session.
   • [bright_cyan]/help[/bright_cyan] - Display detailed help.
-
-Model: [bold magenta]{current_model_name}[/bold magenta]
+Model: [bold magenta]{current_model_name_for_display}[/bold magenta] ([dim]{context_window_display}[/dim])
 
 [bold white]👥 Just ask naturally, like you are communicating with a colleague.[/bold white]"""
 
