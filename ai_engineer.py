@@ -414,6 +414,72 @@ def try_handle_shell_command(user_input: str) -> bool:
 
         return True
     return False
+    
+def try_handle_rules_command(user_input: str) -> bool:
+    """
+    Handles the /rules command to list or add rules to the system prompt.
+    """
+    prefix = "/rules"
+    stripped_input_lower = user_input.strip().lower()
+
+    if stripped_input_lower == prefix or stripped_input_lower.startswith(prefix + " "):
+        command_body = user_input.strip()[len(prefix):].strip()
+        parts = command_body.split(maxsplit=1)
+        sub_command = parts[0].lower() if parts else ""
+        arg = parts[1] if len(parts) > 1 else ""
+
+        if sub_command == "show":
+            console.print("\n[bold blue]📚 Current System Prompt (Rules):[/bold blue]")
+            # The system prompt is the first message in the history
+            if conversation_history and conversation_history[0]["role"] == "system":
+                console.print(Panel(
+                    RichMarkdown(conversation_history[0]["content"]),
+                    title="[bold blue]System Prompt[/bold blue]",
+                    title_align="left",
+                    border_style="blue"
+                ))
+            else:
+                console.print("[yellow]No system prompt found in history.[/yellow]")
+            return True
+
+        elif sub_command == "list":
+            rules_dir = Path("./.aie_rules/")
+            console.print(f"\n[bold blue]📚 Rules files in '[bright_cyan]{rules_dir}[/bright_cyan]':[/bold blue]")
+            try:
+                files = sorted([f.name for f in rules_dir.iterdir() if f.is_file()])
+                if files:
+                    for file_name in files:
+                        console.print(f"  - {file_name}")
+                else:
+                    console.print("[yellow]No rule files found in this directory.[/yellow]")
+            except FileNotFoundError:
+                console.print(f"[red]Error: Directory '[bright_cyan]{rules_dir}[/bright_cyan]' not found.[/red]")
+            except Exception as e:
+                console.print(f"[red]Error listing files in '[bright_cyan]{rules_dir}[/bright_cyan]': {e}[/red]")
+            return True
+
+        elif sub_command == "add":
+            if not arg:
+                console.print("[yellow]Usage: /rules add <rule-file>[/yellow]")
+                console.print("[yellow]  Example: /rules add ./new_guidelines.md[/yellow]")
+                return True
+            try:
+                normalized_path = normalize_path(arg)
+                rule_content = util_read_local_file(normalized_path)
+                # Append the new rules to the existing system prompt
+                conversation_history[0]["content"] += f"\n\n## Additional Rules from {normalized_path}:\n\n{rule_content}"
+                console.print(f"[green]✓ Added rules from '[bright_cyan]{normalized_path}[/bright_cyan]' to the system prompt for this session.[/green]")
+            except (FileNotFoundError, OSError, ValueError) as e:
+                console.print(f"[bold red]✗[/bold red] Could not add rules from '[bright_cyan]{arg}[/bright_cyan]': {e}[/bold red]")
+            return True
+
+        else: # Handles empty sub_command (just "/rules") or unknown sub_command
+            console.print("[yellow]Usage: /rules <show|list|add> [arguments][/yellow]")
+            console.print("[yellow]  show          - Display the current system prompt (rules).[/yellow]")
+            console.print("[yellow]  list          - List available rule files in ./.aie_rules/.[/yellow]")
+            console.print("[yellow]  add <rule-file> - Add rules from a markdown file to the system prompt.[/yellow]")
+            return True
+    return False
 
 def try_handle_context_command(user_input: str) -> bool:
     """
@@ -603,13 +669,13 @@ def _call_llm_for_prompt_generation(user_text: str, mode: str) -> str:
     console.print(f"[bold bright_blue]⚙️ Processing text for prompt {mode}ing...[/bold bright_blue]")
 
     if mode == "refine":
-        meta_system_prompt = dedent(f"""\
+        meta_system_prompt = dedent("""\
             You are a prompt engineering assistant. Your task is to refine the following user-provided text into an optimized prompt suitable for an AI coding assistant like AI Engineer. The refined prompt should be clear, concise, and actionable, guiding the AI to provide the best possible coding assistance.
             The output should be ONLY the refined prompt text, without any preamble or explanation.
             """)
         user_query = f"Refine this text into a prompt for an AI coding assistant:\n\n---\n{user_text}\n---"
     elif mode == "detail":
-        meta_system_prompt = dedent(f"""\
+        meta_system_prompt = dedent("""\
             You are a prompt engineering assistant. Your task is to expand the following user-provided text into a more detailed and comprehensive prompt suitable for an AI coding assistant like AI Engineer. The detailed prompt should elaborate on the user's initial idea, adding necessary context, specifying desired outcomes, and anticipating potential ambiguities to guide the AI effectively.
             The output should be ONLY the detailed prompt text, without any preamble or explanation.
             """)
@@ -1324,7 +1390,7 @@ def main():
                             prompt_prefix = f"[Ctx: {percentage_used:.0f}%{default_note}] "
                         else: # Should not happen if get_model_context_window returns a default
                             prompt_prefix = f"[Ctx: {tokens_used} toks] "
-                except Exception as e:
+                except Exception:
                     # Silently fail or print a dim message if token calculation fails
                     # For example, if litellm.token_counter doesn't support the model
                     # console.print(f"[dim]Could not calculate token usage: {e}[/dim]")
@@ -1354,6 +1420,8 @@ def main():
         if try_handle_shell_command(user_input):
             continue
         if try_handle_session_command(user_input): # New: session handler
+            continue
+        if try_handle_rules_command(user_input): # New: rules handler
             continue
         if try_handle_context_command(user_input):
             continue

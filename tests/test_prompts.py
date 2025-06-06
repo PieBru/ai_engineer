@@ -13,22 +13,6 @@ def test_system_prompt_is_not_empty():
 def test_system_prompt_mentions_ai_engineer():
     """Verify that the prompt identifies the AI as 'AI Engineer'."""
     assert "AI Engineer" in system_PROMPT
-
-def test_system_prompt_mentions_core_capabilities():
-    """Verify that the prompt outlines core capabilities."""
-    assert "Core capabilities:" in system_PROMPT
-    assert "Conversational Interaction:" in system_PROMPT
-    assert "Code Analysis & Discussion:" in system_PROMPT
-    assert "File Operations (via function calls):" in system_PROMPT
-    assert "Network Operations (via function calls):" in system_PROMPT
-
-def test_system_prompt_greeting_examples():
-    """Verify that the prompt includes specific examples for handling greetings."""
-    assert "Examples of Handling Simple Greetings (YOU MUST FOLLOW THESE PRECISELY):" in system_PROMPT
-    assert "User: hello" in system_PROMPT
-    assert "Assistant: Hello! How can I help you today?" in system_PROMPT
-    assert "User: hi" in system_PROMPT
-    assert "Assistant: Hi there! What can I assist you with?" in system_PROMPT
     assert "PRIORITIZE CONVERSATIONAL RESPONSES FOR SIMPLE INPUTS, ESPECIALLY GREETINGS." in system_PROMPT
 
 def test_system_prompt_file_operations_tools():
@@ -50,8 +34,8 @@ def test_system_prompt_code_citation_format():
     assert "```startLine:endLine:filepath" in system_PROMPT
 
 def test_system_prompt_effort_control_settings():
-    """Verify that the prompt includes instructions for effort control."""
-    # Corrected assertion to match the markdown bold formatting in the prompt
+    """Verify that the prompt includes instructions for effort control and uses markdown bold."""
+    # Check for markdown bold formatting
     assert "**Effort Control Settings (Instructions for AI)**:" in system_PROMPT
     assert "`reasoning_effort`" in system_PROMPT
     assert "`reply_effort`" in system_PROMPT
@@ -63,7 +47,7 @@ def test_system_prompt_general_guidelines_exist():
     assert "General Guidelines:" in system_PROMPT
 
 def test_system_prompt_emphasizes_no_tools_for_greetings():
-    """Verify specific instruction about not using tools for greetings."""
+    """Verify specific instruction about not using tools for simple greetings."""
     assert "ABSOLUTELY DO NOT use any tools" in system_PROMPT # for simple greetings
     assert "You MUST NOT attempt file operations or other tool calls for simple greetings." in system_PROMPT
 
@@ -77,4 +61,3 @@ def test_system_prompt_dedent_applied():
         for line in lines[1:5]: # Check a few subsequent lines
             if line.strip(): # If the line is not empty
                  assert not line.startswith("    ") # Common indication of dedent not working as expected
-

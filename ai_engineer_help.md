@@ -41,4 +41,11 @@
     - `refine <text>`: Optimizes `<text>` into a clearer and more effective prompt.
     - `detail <text>`: Expands `<text>` into a more comprehensive and detailed prompt.
 
+*   **`/rules`** `<subcommand> [arguments]` - Manage the AI's guiding rules (system prompt).
+    Call `/rules` without arguments for detailed usage.
+    Subcommands:
+    - `show`: Display the current system prompt (rules) being used.
+    - `list`: List available rule files in the `./.aie_rules/` directory.
+    - `add <rule-file>`: Add rules from a specified markdown file to the current session's system prompt.
+
 *   **Just ask naturally:** The AI will handle file operations automatically by mentioning files in your conversation.

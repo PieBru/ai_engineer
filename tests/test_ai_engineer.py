@@ -438,6 +438,119 @@ class TestCommandHandling:
                           for msg in de.conversation_history if msg["role"] == "system" and "Content of file" in msg["content"])
         assert not file3_added, f"File '{normalized_file3_path}' from subdir should not have been added."
 
+
+class TestRulesCommand:
+
+    @patch('ai_engineer.console.print')
+    def test_try_handle_rules_command_show(self, mock_console_print):
+        de.conversation_history = [{"role": "system", "content": "Initial system prompt content."}]
+        handled = de.try_handle_rules_command("/rules list")
+        assert handled
+        mock_console_print.assert_any_call("\n[bold blue]📚 Current System Prompt (Rules):[/bold blue]")
+        # Check that Panel with RichMarkdown is called
+        # We can't easily check the RichMarkdown object content directly without more complex mocking,
+        # but we can check that console.print was called with a Panel object.
+        panel_call_found = False
+        for call_args in mock_console_print.call_args_list:
+            if call_args[0] and isinstance(call_args[0][0], de.Panel):
+                panel_call_found = True
+                break
+        assert panel_call_found, "Console print was not called with a Rich Panel object for the system prompt."
+
+    @patch('ai_engineer.console.print')
+    @patch('ai_engineer.Path')
+    def test_try_handle_rules_command_list_success(self, mock_path, mock_console_print):
+        mock_rules_dir = MagicMock()
+        mock_path.return_value = mock_rules_dir
+        
+        # Mock iterdir to return mock file objects
+        mock_file1 = MagicMock()
+        mock_file1.name = "rule1.md"
+        mock_file1.is_file.return_value = True
+        mock_file2 = MagicMock()
+        mock_file2.name = "rule2.txt"
+        mock_file2.is_file.return_value = True
+        mock_dir = MagicMock()
+        mock_dir.name = "subdir"
+        mock_dir.is_file.return_value = False # Exclude directories
+
+        mock_rules_dir.iterdir.return_value = [mock_file1, mock_dir, mock_file2]
+
+        handled = de.try_handle_rules_command("/rules list")
+        assert handled
+        mock_path.assert_called_once_with("./.aie_rules/")
+        mock_rules_dir.iterdir.assert_called_once()
+        
+        # Check console output
+        mock_console_print.assert_any_call("\n[bold blue]📚 Rules files in '[bright_cyan]./.aie_rules/'[/bright_cyan]':[/bold blue]")
+        mock_console_print.assert_any_call("  - rule1.md")
+        mock_console_print.assert_any_call("  - rule2.txt")
+
+    @patch('ai_engineer.console.print')
+    @patch('ai_engineer.Path', side_effect=FileNotFoundError("Dir not found"))
+    def test_try_handle_rules_command_list_dir_not_found(self, mock_path, mock_console_print):
+        handled = de.try_handle_rules_command("/rules list")
+        assert handled
+        mock_path.assert_called_once_with("./.aie_rules/")
+        mock_console_print.assert_any_call("[red]Error: Directory '[bright_cyan]./.aie_rules/'[/bright_cyan]' not found.[/red]")
+
+    @patch('ai_engineer.util_read_local_file', return_value="## New Rule\n\nDo this.")
+    @patch('ai_engineer.normalize_path', side_effect=lambda x: x) # Mock normalization to simplify path checks
+    @patch('ai_engineer.console.print')
+    def test_try_handle_rules_command_add_success(self, mock_console_print, mock_normalize_path, mock_read_file):
+        initial_prompt = "Initial system prompt content."
+        de.conversation_history = [{"role": "system", "content": initial_prompt}]
+        rule_file_path = "path/to/new_rules.md"
+
+        handled = de.try_handle_rules_command(f"/rules add {rule_file_path}")
+        assert handled
+        mock_normalize_path.assert_called_once_with(rule_file_path)
+        mock_read_file.assert_called_once_with(rule_file_path)
+
+        expected_new_prompt = initial_prompt + f"\n\n## Additional Rules from {rule_file_path}:\n\n## New Rule\n\nDo this."
+        assert de.conversation_history[0]["content"] == expected_new_prompt
+        mock_console_print.assert_called_once_with(f"[green]✓ Added rules from '[bright_cyan]{rule_file_path}[/bright_cyan]' to the system prompt for this session.[/green]")
+
+    @patch('ai_engineer.util_read_local_file', side_effect=FileNotFoundError("File not found"))
+    @patch('ai_engineer.normalize_path', side_effect=lambda x: x)
+    @patch('ai_engineer.console.print')
+    def test_try_handle_rules_command_add_file_not_found(self, mock_console_print, mock_normalize_path, mock_read_file):
+        initial_prompt = "Initial system prompt content."
+        de.conversation_history = [{"role": "system", "content": initial_prompt}]
+        rule_file_path = "non_existent_rules.md"
+
+        handled = de.try_handle_rules_command(f"/rules add {rule_file_path}")
+        assert handled
+        mock_normalize_path.assert_called_once_with(rule_file_path)
+        mock_read_file.assert_called_once_with(rule_file_path)
+        assert de.conversation_history[0]["content"] == initial_prompt # Prompt should not change
+        mock_console_print.assert_called_once_with(f"[bold red]✗[/bold red] Could not add rules from '[bright_cyan]{rule_file_path}[/bright_cyan]': File not found[/bold red]")
+
+    @patch('ai_engineer.normalize_path', side_effect=ValueError("Invalid path"))
+    @patch('ai_engineer.console.print')
+    def test_try_handle_rules_command_add_invalid_path(self, mock_console_print, mock_normalize_path):
+        initial_prompt = "Initial system prompt content."
+        de.conversation_history = [{"role": "system", "content": initial_prompt}]
+        rule_file_path = "../invalid/path.md"
+
+        handled = de.try_handle_rules_command(f"/rules add {rule_file_path}")
+        assert handled
+        mock_normalize_path.assert_called_once_with(rule_file_path)
+        assert de.conversation_history[0]["content"] == initial_prompt # Prompt should not change
+        mock_console_print.assert_called_once_with(f"[bold red]✗[/bold red] Could not add rules from '[bright_cyan]{rule_file_path}[/bright_cyan]': Invalid path[/bold red]")
+
+    @patch('ai_engineer.console.print')
+    def test_try_handle_rules_command_add_no_argument(self, mock_console_print):
+        handled = de.try_handle_rules_command("/rules add")
+        assert handled
+        mock_console_print.assert_any_call("[yellow]Usage: /rules add <rule-file>[/yellow]")
+
+    @patch('ai_engineer.console.print')
+    def test_try_handle_rules_command_no_subcommand(self, mock_console_print):
+        handled = de.try_handle_rules_command("/rules")
+        assert handled
+        mock_console_print.assert_any_call("[yellow]Usage: /rules <list|add> [arguments][/yellow]")
+
     def test_add_directory_to_conversation(self, tmp_path, capsys):
         # Setup directory structure
         (tmp_path / "file1.py").write_text("python code")

@@ -195,6 +195,10 @@ You> Now review this codebase structure
     *   `reply_effort`: Define the desired effort/detail in AI replies (e.g., `/set reply_effort high`).
     *   `temperature`: Adjust model creativity/randomness, typically a float (e.g., `/set temperature 0.7`).
 
+*   **Rule Management (`/rules` command)**: Manage the AI's guiding rules.
+    *   `show`: Display the current system prompt (rules) being used.
+    *   `list`: List available rule files in the `./.aie_rules/` directory.
+    *   `add <rule-file>`: Add rules from a specified markdown file to the current session's system prompt.
 
 ### **High-Level Architecture**
 The following diagram illustrates the main components and their interactions within AI Engineer:
