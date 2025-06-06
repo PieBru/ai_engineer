@@ -202,139 +202,148 @@ def _handle_remote_mcp_sse(endpoint_url: str, max_events: int, listen_timeout_se
 
 
 def try_handle_add_command(user_input: str) -> bool:
-    command_name_lower = "/add"
-    prefix_with_space = command_name_lower + " "
-    stripped_input_lower = user_input.strip().lower()
+    command_prefix = "/add"
+    stripped_input = user_input.strip()
 
-    if stripped_input_lower == command_name_lower or stripped_input_lower.startswith(prefix_with_space):
-        path_to_add = ""
-        if stripped_input_lower.startswith(prefix_with_space):
-            path_to_add = user_input.strip()[len(prefix_with_space):].strip()
+    # Strict check: input must be exactly the command or command + space + args
+    if not (stripped_input.lower() == command_prefix or stripped_input.lower().startswith(command_prefix + " ")):
+        return False
 
-        if not path_to_add:
-            console.print("[yellow]Usage: /add <file_path_or_folder_path>[/yellow]")
-            console.print("[yellow]  Example: /add src/my_file.py[/yellow]")
-            console.print("[yellow]  Example: /add ./my_project_folder[/yellow]")
-            return True
-        try:
-            # Use imported normalize_path
-            normalized_path = normalize_path(path_to_add)
-            if os.path.isdir(normalized_path):
-                # Handle entire directory
-                add_directory_to_conversation(normalized_path)
-            else:
-                # Handle a single file as before
-                # Use imported util_read_local_file
-                content = util_read_local_file(normalized_path)
-                conversation_history.append({ # Add to global history
-                    "role": "system",
-                    "content": f"Content of file '{normalized_path}':\n\n{content}"
-                })
-                console.print(f"[bold blue]✓[/bold blue] Added file '[bright_cyan]{normalized_path}[/bright_cyan]' to conversation.\n")
-        except ValueError as e: # Catch errors from normalize_path
-             console.print(f"[bold red]✗[/bold red] Could not add path '[bright_cyan]{path_to_add}[/bright_cyan]': {e}\n")
-        except OSError as e:
+    # If we are here, it IS an /add command.
+    prefix_with_space = command_prefix + " "
+    path_to_add = ""
+    if stripped_input.lower().startswith(prefix_with_space):
+        path_to_add = stripped_input[len(prefix_with_space):].strip()
+    elif stripped_input.lower() == command_prefix: # Just "/add"
+        path_to_add = "" # Will trigger usage message
+
+    if not path_to_add:
+        console.print("[yellow]Usage: /add <file_path_or_folder_path>[/yellow]")
+        console.print("[yellow]  Example: /add src/my_file.py[/yellow]")
+        console.print("[yellow]  Example: /add ./my_project_folder[/yellow]")
+        return True # Handled (printed usage)
+    try:
+        # Use imported normalize_path
+        normalized_path = normalize_path(path_to_add)
+        if os.path.isdir(normalized_path):
+            # Handle entire directory
+            add_directory_to_conversation(normalized_path)
+        else:
+            # Handle a single file as before
+            # Use imported util_read_local_file
+            content = util_read_local_file(normalized_path)
+            conversation_history.append({ # Add to global history
+                "role": "system",
+                "content": f"Content of file '{normalized_path}':\n\n{content}"
+            })
+            console.print(f"[bold blue]✓[/bold blue] Added file '[bright_cyan]{normalized_path}[/bright_cyan]' to conversation.\n")
+    except ValueError as e: # Catch errors from normalize_path
             console.print(f"[bold red]✗[/bold red] Could not add path '[bright_cyan]{path_to_add}[/bright_cyan]': {e}\n")
-        return True
-    return False
+    except OSError as e:
+        console.print(f"[bold red]✗[/bold red] Could not add path '[bright_cyan]{path_to_add}[/bright_cyan]': {e}\n")
+    return True # Handled (attempted to process or printed error)
 
 
 def try_handle_set_command(user_input: str) -> bool:
     """
     Handles the /set command to change configuration parameters at runtime.
     """
-    prefix = "/set "
-    # Use imported SUPPORTED_SET_PARAMS
-    command_name_lower = "/set"
-    stripped_input_lower = user_input.strip().lower()
+    command_prefix = "/set"
+    stripped_input = user_input.strip()
 
-    if stripped_input_lower == command_name_lower or stripped_input_lower.startswith(prefix):
-        command_body = ""
-        if stripped_input_lower.startswith(prefix):
-            command_body = user_input.strip()[len(prefix):].strip()
+    # Strict check
+    if not (stripped_input.lower() == command_prefix or stripped_input.lower().startswith(command_prefix + " ")):
+        return False
 
-        if not command_body:
-            console.print("[yellow]Available parameters to set:[/yellow]")
-            for p_name, p_config in SUPPORTED_SET_PARAMS.items():
-                console.print(f"  [bright_cyan]{p_name}[/bright_cyan]: {p_config['description']}")
-                if "allowed_values" in p_config:
-                    console.print(f"    Allowed: {', '.join(p_config['allowed_values'])}")
-            console.print("\n[yellow]Usage: /set <parameter> <value>[/yellow]")
-            console.print("[yellow]  Example: /set model gpt-4o[/yellow]")
+    prefix_with_space = command_prefix + " "
+    command_body = ""
+    if stripped_input.lower().startswith(prefix_with_space):
+        command_body = stripped_input[len(prefix_with_space):].strip()
+    # If it's just "/set" (and not "/set "), command_body remains "" and usage is printed below
+
+    if not command_body:
+        console.print("[yellow]Available parameters to set:[/yellow]")
+        for p_name, p_config in SUPPORTED_SET_PARAMS.items():
+            console.print(f"  [bright_cyan]{p_name}[/bright_cyan]: {p_config['description']}")
+            if "allowed_values" in p_config:
+                console.print(f"    Allowed: {', '.join(p_config['allowed_values'])}")
+        console.print("\n[yellow]Usage: /set <parameter> <value>[/yellow]")
+        console.print("[yellow]  Example: /set model gpt-4o[/yellow]")
+        return True
+
+    command_parts = command_body.split(maxsplit=1)
+    if len(command_parts) < 2:
+        console.print("[yellow]Usage: /set <parameter> <value>[/yellow]")
+        return True
+
+    param_name, value = command_parts[0].lower(), command_parts[1]
+
+    if param_name == "system_prompt":
+        file_path = value # value is the path from /set system_prompt <path>
+        try:
+            # Use imported normalize_path and util_read_local_file
+            normalized_path = normalize_path(file_path)
+            new_prompt_content = util_read_local_file(normalized_path)
+
+            if conversation_history and conversation_history[0]["role"] == "system":
+                conversation_history[0]["content"] = new_prompt_content
+            else:
+                # Should not happen if history is initialized correctly, but as a fallback:
+                conversation_history.insert(0, {"role": "system", "content": new_prompt_content})
+
+            RUNTIME_OVERRIDES[param_name] = new_prompt_content # Store the actual content
+            console.print(f"[green]✓ System prompt updated from file '[bright_cyan]{normalized_path}[/bright_cyan]'.[/green]")
+        except FileNotFoundError:
+            console.print(f"[red]Error: File not found at '[bright_cyan]{file_path}[/bright_cyan]'. System prompt not changed.[/red]")
+        except (OSError, ValueError) as e: # ValueError from normalize_path or read errors
+            console.print(f"[red]Error reading or normalizing file '[bright_cyan]{file_path}[/bright_cyan]': {e}. System prompt not changed.[/red]")
+        return True # Command was handled, even if there was an error
+    elif param_name in SUPPORTED_SET_PARAMS:
+        param_config = SUPPORTED_SET_PARAMS[param_name]
+
+        if "allowed_values" in param_config and value.lower() not in param_config["allowed_values"]:
+            console.print(f"[red]Error: Invalid value '{value}' for '{param_name}'. Allowed values: {', '.join(param_config.get('allowed_values', []))}[/red]")
             return True
 
-        command_parts = command_body.split(maxsplit=1)
-        if len(command_parts) < 2:
-            console.print("[yellow]Usage: /set <parameter> <value>[/yellow]")
-            return True
-
-        param_name, value = command_parts[0].lower(), command_parts[1]
-
-        if param_name == "system_prompt":
-            file_path = value # value is the path from /set system_prompt <path>
+        # Type conversion and validation based on parameter
+        if param_name == "max_tokens":
             try:
-                # Use imported normalize_path and util_read_local_file
-                normalized_path = normalize_path(file_path)
-                new_prompt_content = util_read_local_file(normalized_path)
-
-                if conversation_history and conversation_history[0]["role"] == "system":
-                    conversation_history[0]["content"] = new_prompt_content
-                else:
-                    # Should not happen if history is initialized correctly, but as a fallback:
-                    conversation_history.insert(0, {"role": "system", "content": new_prompt_content})
-
-                RUNTIME_OVERRIDES[param_name] = new_prompt_content # Store the actual content
-                console.print(f"[green]✓ System prompt updated from file '[bright_cyan]{normalized_path}[/bright_cyan]'.[/green]")
-            except FileNotFoundError:
-                console.print(f"[red]Error: File not found at '[bright_cyan]{file_path}[/bright_cyan]'. System prompt not changed.[/red]")
-            except (OSError, ValueError) as e: # ValueError from normalize_path or read errors
-                console.print(f"[red]Error reading or normalizing file '[bright_cyan]{file_path}[/bright_cyan]': {e}. System prompt not changed.[/red]")
-            return True # Command was handled, even if there was an error
-        elif param_name in SUPPORTED_SET_PARAMS:
-            param_config = SUPPORTED_SET_PARAMS[param_name]
-
-            if "allowed_values" in param_config and value.lower() not in param_config["allowed_values"]:
-                console.print(f"[red]Error: Invalid value '{value}' for '{param_name}'. Allowed values: {', '.join(param_config.get('allowed_values', []))}[/red]")
+                int_value = int(value)
+                if int_value <= 0:
+                    raise ValueError("max_tokens must be a positive integer.")
+                value = int_value # Store as int
+            except ValueError:
+                console.print(f"[red]Error: Invalid value '{value}' for 'max_tokens'. Must be a positive integer.[/red]")
                 return True
+        elif param_name == "temperature":
+            try:
+                float_value = float(value)
+                if not (0.0 <= float_value <= 2.0): # Temperature is typically between 0.0 and 2.0
+                    raise ValueError("Temperature must be a float between 0.0 and 2.0.")
+                value = float_value # Store as float
+            except ValueError as e:
+                console.print(f"[red]Error: Invalid value '{value}' for 'temperature'. Must be a float between 0.0 and 2.0. Details: {e}[/red]")
+                return True
+        # For other parameters (model, api_base, reasoning_style, reasoning_effort, reply_effort),
+        # the value can be stored as a string directly.
 
-            # Type conversion and validation based on parameter
-            if param_name == "max_tokens":
-                try:
-                    int_value = int(value)
-                    if int_value <= 0:
-                        raise ValueError("max_tokens must be a positive integer.")
-                    value = int_value # Store as int
-                except ValueError:
-                    console.print(f"[red]Error: Invalid value '{value}' for 'max_tokens'. Must be a positive integer.[/red]")
-                    return True
-            elif param_name == "temperature":
-                try:
-                    float_value = float(value)
-                    if not (0.0 <= float_value <= 2.0): # Temperature is typically between 0.0 and 2.0
-                        raise ValueError("Temperature must be a float between 0.0 and 2.0.")
-                    value = float_value # Store as float
-                except ValueError as e:
-                    console.print(f"[red]Error: Invalid value '{value}' for 'temperature'. Must be a float between 0.0 and 2.0. Details: {e}[/red]")
-                    return True
-            # For other parameters (model, api_base, reasoning_style, reasoning_effort, reply_effort),
-            # the value can be stored as a string directly.
-
-            # If we reached here, the parameter is valid and value is potentially converted/validated
-            RUNTIME_OVERRIDES[param_name] = value
-            console.print(f"[green]✓ Parameter '{param_name}' set to '{value}' for the current session.[/green]")
-            return True
-        else: # Unknown parameter (not system_prompt and not in SUPPORTED_SET_PARAMS)
-            console.print(f"[red]Error: Unknown parameter '{param_name}'. Supported parameters: {', '.join(SUPPORTED_SET_PARAMS.keys())}[/red]")
-            return True
+        # If we reached here, the parameter is valid and value is potentially converted/validated
+        RUNTIME_OVERRIDES[param_name] = value
+        console.print(f"[green]✓ Parameter '{param_name}' set to '{value}' for the current session.[/green]")
+        return True
+    else: # Unknown parameter (not system_prompt and not in SUPPORTED_SET_PARAMS)
+        console.print(f"[red]Error: Unknown parameter '{param_name}'. Supported parameters: {', '.join(SUPPORTED_SET_PARAMS.keys())}[/red]")
+        return True
 
 def try_handle_help_command(user_input: str) -> bool:
     """
     Handles the /help command to display the help markdown file.
     """
-    prefix = "/help"
-    if user_input.strip().lower() == prefix:
+    command_prefix = "/help"
+    if user_input.strip().lower() == command_prefix:
         help_file_path = Path(__file__).parent / "ai_engineer_help.md"
         try:
+            # Ensure util_read_local_file is used if it's the standard
             # Use imported util_read_local_file
             help_content = util_read_local_file(str(help_file_path))
             console.print(Panel(
@@ -355,225 +364,232 @@ def try_handle_shell_command(user_input: str) -> bool:
     """
     Handles the /shell command to execute a shell command and add output to history.
     """
-    prefix = "/shell "
-    command_name_lower = "/shell"
-    stripped_input_lower = user_input.strip().lower()
+    command_prefix = "/shell"
+    stripped_input = user_input.strip()
 
-    if stripped_input_lower == command_name_lower or stripped_input_lower.startswith(prefix):
-        command_body = ""
-        if stripped_input_lower.startswith(prefix):
-            command_body = user_input.strip()[len(prefix):].strip()
+    # Strict check
+    if not (stripped_input.lower() == command_prefix or stripped_input.lower().startswith(command_prefix + " ")):
+        return False
 
-        if not command_body:
+    prefix_with_space = command_prefix + " "
+    command_body = ""
+    if stripped_input.lower().startswith(prefix_with_space):
+        command_body = stripped_input[len(prefix_with_space):].strip()
+
+    if not command_body:
             console.print("[yellow]Usage: /shell <command and arguments>[/yellow]")
             console.print("[yellow]  Example: /shell ls -l[/yellow]")
             console.print("[bold yellow]⚠️ Warning: Executing arbitrary shell commands can be risky.[/bold yellow]")
             return True
+    
+    console.print(f"[bold bright_blue]🐚 Executing shell command: '{command_body}'[/bold bright_blue]")
+    console.print("[dim]Output:[/dim]")
 
-        console.print(f"[bold bright_blue]🐚 Executing shell command: '{command_body}'[/bold bright_blue]")
-        console.print("[dim]Output:[/dim]")
+    try:
+        # Execute the command
+        # Use shell=True for simplicity as requested, but note security risks
+        # capture_output=True captures stdout and stderr
+        # text=True decodes stdout/stderr as text
+        result = subprocess.run(command_body, shell=True, capture_output=True, text=True, check=False)
 
-        try:
-            # Execute the command
-            # Use shell=True for simplicity as requested, but note security risks
-            # capture_output=True captures stdout and stderr
-            # text=True decodes stdout/stderr as text
-            result = subprocess.run(command_body, shell=True, capture_output=True, text=True, check=False)
+        output = result.stdout.strip()
+        error_output = result.stderr.strip()
+        return_code = result.returncode
 
-            output = result.stdout.strip()
-            error_output = result.stderr.strip()
-            return_code = result.returncode
+        # Print output to console in real-time (or after execution for subprocess.run)
+        if output:
+            console.print(output)
+        if error_output:
+            console.print(f"[red]Stderr:[/red]\n{error_output}")
+        if return_code != 0:
+            console.print(f"[red]Command exited with non-zero status code: {return_code}[/red]")
 
-            # Print output to console in real-time (or after execution for subprocess.run)
-            if output:
-                console.print(output)
-            if error_output:
-                console.print(f"[red]Stderr:[/red]\n{error_output}")
-            if return_code != 0:
-                 console.print(f"[red]Command exited with non-zero status code: {return_code}[/red]")
+        # Add output to conversation history
+        history_content = f"Shell command executed: '{command_body}'\n\n"
+        if output:
+            history_content += f"Stdout:\n```\n{output}\n```\n"
+        if error_output:
+            history_content += f"Stderr:\n```\n{error_output}\n```\n"
+        if return_code != 0:
+            history_content += f"Return Code: {return_code}\n"
 
-            # Add output to conversation history
-            history_content = f"Shell command executed: '{command_body}'\n\n"
-            if output:
-                history_content += f"Stdout:\n```\n{output}\n```\n"
-            if error_output:
-                 history_content += f"Stderr:\n```\n{error_output}\n```\n"
-            if return_code != 0:
-                 history_content += f"Return Code: {return_code}\n"
+        conversation_history.append({
+            "role": "system",
+            "content": history_content.strip()
+        })
+        console.print("[bold blue]✓[/bold blue] Shell output added to conversation history.\n")
 
-            conversation_history.append({
-                "role": "system",
-                "content": history_content.strip()
-            })
-            console.print("[bold blue]✓[/bold blue] Shell output added to conversation history.\n")
+    except FileNotFoundError:
+        # This happens if shell=False and the command itself is not found
+        console.print(f"[red]Error: Command not found: '{command_body.split()[0]}'[/red]")
+        conversation_history.append({
+            "role": "system",
+            "content": f"Error: Shell command not found: '{command_body.split()[0]}'"
+        })
+    except Exception as e:
+        console.print(f"[red]An error occurred during shell execution: {e}[/red]")
+        conversation_history.append({
+            "role": "system",
+            "content": f"Error executing shell command '{command_body}': {e}"
+        })
 
-        except FileNotFoundError:
-            # This happens if shell=False and the command itself is not found
-             console.print(f"[red]Error: Command not found: '{command_body.split()[0]}'[/red]")
-             conversation_history.append({
-                "role": "system",
-                "content": f"Error: Shell command not found: '{command_body.split()[0]}'"
-            })
-        except Exception as e:
-            console.print(f"[red]An error occurred during shell execution: {e}[/red]")
-            conversation_history.append({
-                "role": "system",
-                "content": f"Error executing shell command '{command_body}': {e}"
-            })
-
-        return True
-    return False
+    return True
     
 def try_handle_rules_command(user_input: str) -> bool:
     """
     Handles the /rules command to list or add rules to the system prompt.
     """
-    prefix = "/rules"
-    stripped_input_lower = user_input.strip().lower()
+    command_prefix = "/rules"
+    stripped_input = user_input.strip()
 
-    if stripped_input_lower == prefix or stripped_input_lower.startswith(prefix + " "):
-        command_body = user_input.strip()[len(prefix):].strip()
-        parts = command_body.split(maxsplit=1)
-        sub_command = parts[0].lower() if parts else ""
-        arg = parts[1] if len(parts) > 1 else ""
+    # Strict check
+    if not (stripped_input.lower() == command_prefix or stripped_input.lower().startswith(command_prefix + " ")):
+        return False
 
-        if sub_command == "show":
-            console.print("\n[bold blue]📚 Current System Prompt (Rules):[/bold blue]")
-            # The system prompt is the first message in the history
-            if conversation_history and conversation_history[0]["role"] == "system":
-                console.print(Panel(
-                    RichMarkdown(conversation_history[0]["content"]),
-                    title="[bold blue]System Prompt[/bold blue]",
-                    title_align="left",
-                    border_style="blue"
-                ))
+    command_body = stripped_input[len(command_prefix):].strip() # Get part after "/rules"
+    parts = command_body.split(maxsplit=1)
+    sub_command = parts[0].lower() if parts else ""
+    arg = parts[1] if len(parts) > 1 else ""
+
+    if sub_command == "show":
+        console.print("\n[bold blue]📚 Current System Prompt (Rules):[/bold blue]")
+        # The system prompt is the first message in the history
+        if conversation_history and conversation_history[0]["role"] == "system":
+            console.print(Panel(
+                RichMarkdown(conversation_history[0]["content"]),
+                title="[bold blue]System Prompt[/bold blue]",
+                title_align="left",
+                border_style="blue"
+            ))
+        else:
+            console.print("[yellow]No system prompt found in history.[/yellow]")
+        return True
+
+    elif sub_command == "list":
+        rules_dir = Path("./.aie_rules/")
+        console.print(f"\n[bold blue]📚 Rules files in '[bright_cyan]{rules_dir}[/bright_cyan]':[/bold blue]")
+        try:
+            files = sorted([f.name for f in rules_dir.iterdir() if f.is_file()])
+            if files:
+                for file_name in files:
+                    console.print(f"  - {file_name}")
             else:
-                console.print("[yellow]No system prompt found in history.[/yellow]")
-            return True
+                console.print("[yellow]No rule files found in this directory.[/yellow]")
+        except FileNotFoundError:
+            console.print(f"[red]Error: Directory '[bright_cyan]{rules_dir}[/bright_cyan]' not found.[/red]")
+        except Exception as e:
+            console.print(f"[red]Error listing files in '[bright_cyan]{rules_dir}[/bright_cyan]': {e}[/red]")
+        return True
 
-        elif sub_command == "list":
-            rules_dir = Path("./.aie_rules/")
-            console.print(f"\n[bold blue]📚 Rules files in '[bright_cyan]{rules_dir}[/bright_cyan]':[/bold blue]")
-            try:
-                files = sorted([f.name for f in rules_dir.iterdir() if f.is_file()])
-                if files:
-                    for file_name in files:
-                        console.print(f"  - {file_name}")
-                else:
-                    console.print("[yellow]No rule files found in this directory.[/yellow]")
-            except FileNotFoundError:
-                console.print(f"[red]Error: Directory '[bright_cyan]{rules_dir}[/bright_cyan]' not found.[/red]")
-            except Exception as e:
-                console.print(f"[red]Error listing files in '[bright_cyan]{rules_dir}[/bright_cyan]': {e}[/red]")
+    elif sub_command == "add":
+        if not arg:
+            console.print("[yellow]Usage: /rules add <rule-file>[/yellow]")
+            console.print("[yellow]  Example: /rules add ./new_guidelines.md[/yellow]")
             return True
+        try:
+            normalized_path = normalize_path(arg)
+            rule_content = util_read_local_file(normalized_path)
+            # Append the new rules to the existing system prompt
+            conversation_history[0]["content"] += f"\n\n## Additional Rules from {normalized_path}:\n\n{rule_content}"
+            console.print(f"[green]✓ Added rules from '[bright_cyan]{normalized_path}[/bright_cyan]' to the system prompt for this session.[/green]")
+        except (FileNotFoundError, OSError, ValueError) as e:
+            console.print(f"[bold red]✗[/bold red] Could not add rules from '[bright_cyan]{arg}[/bright_cyan]': {e}[/bold red]")
+        return True
 
-        elif sub_command == "add":
-            if not arg:
-                console.print("[yellow]Usage: /rules add <rule-file>[/yellow]")
-                console.print("[yellow]  Example: /rules add ./new_guidelines.md[/yellow]")
-                return True
+    elif sub_command == "reset":
+        if conversation_history and conversation_history[0]["role"] == "system":
+            # Reset to the imported default system_PROMPT
+            conversation_history[0]["content"] = "" # Empties the system prompt
+            # Clear any runtime override for system_prompt file path
+            RUNTIME_OVERRIDES.pop("system_prompt", None)
+            console.print("[green]✓ System prompt emptied.[/green]")
+        else:
+            console.print("[yellow]Warning: Could not find system prompt in history to reset.[/yellow]")
+            # Initialize if somehow missing (should not happen in normal flow)
+            conversation_history.insert(0, {"role": "system", "content": system_PROMPT})
+
+        default_rules_dir = Path("./.aie_rules/")
+        default_rules_file_name = "_default.md"
+        default_rules_path = default_rules_dir / default_rules_file_name
+        default_rules_path_str = str(default_rules_path)
+
+        confirmation = prompt_session.prompt(
+            f"Load default rules from '[bright_cyan]{default_rules_path_str}[/bright_cyan]'? [Y/n]: ",
+            default="y"
+        ).strip().lower()
+
+        if confirmation in ["y", "yes", ""]:
             try:
-                normalized_path = normalize_path(arg)
+                normalized_path = normalize_path(default_rules_path_str) # Normalizes and checks existence implicitly via read
                 rule_content = util_read_local_file(normalized_path)
-                # Append the new rules to the existing system prompt
                 conversation_history[0]["content"] += f"\n\n## Additional Rules from {normalized_path}:\n\n{rule_content}"
-                console.print(f"[green]✓ Added rules from '[bright_cyan]{normalized_path}[/bright_cyan]' to the system prompt for this session.[/green]")
-            except (FileNotFoundError, OSError, ValueError) as e:
-                console.print(f"[bold red]✗[/bold red] Could not add rules from '[bright_cyan]{arg}[/bright_cyan]': {e}[/bold red]")
-            return True
-
-        elif sub_command == "reset":
-            if conversation_history and conversation_history[0]["role"] == "system":
-                # Reset to the imported default system_PROMPT
-                conversation_history[0]["content"] = "" # Empties the system prompt
-                # Clear any runtime override for system_prompt file path
-                RUNTIME_OVERRIDES.pop("system_prompt", None)
-                console.print("[green]✓ System prompt emptied.[/green]")
-            else:
-                console.print("[yellow]Warning: Could not find system prompt in history to reset.[/yellow]")
-                # Initialize if somehow missing (should not happen in normal flow)
-                conversation_history.insert(0, {"role": "system", "content": system_PROMPT})
-
-            default_rules_dir = Path("./.aie_rules/")
-            default_rules_file_name = "_default.md"
-            default_rules_path = default_rules_dir / default_rules_file_name
-            default_rules_path_str = str(default_rules_path)
-
-            confirmation = prompt_session.prompt(
-                f"Load default rules from '[bright_cyan]{default_rules_path_str}[/bright_cyan]'? [Y/n]: ",
-                default="y"
-            ).strip().lower()
-
-            if confirmation in ["y", "yes", ""]:
-                try:
-                    normalized_path = normalize_path(default_rules_path_str) # Normalizes and checks existence implicitly via read
-                    rule_content = util_read_local_file(normalized_path)
-                    conversation_history[0]["content"] += f"\n\n## Additional Rules from {normalized_path}:\n\n{rule_content}"
-                    console.print(f"[green]✓ Added default rules from '[bright_cyan]{normalized_path}[/bright_cyan]' to the system prompt.[/green]")
-                except FileNotFoundError:
-                    console.print(f"[yellow]⚠ Default rules file '[bright_cyan]{normalized_path if 'normalized_path' in locals() else default_rules_path_str}[/bright_cyan]' not found. No default rules loaded.[/yellow]")
-                except (OSError, ValueError) as e: # ValueError from normalize_path or read errors
-                    console.print(f"[bold red]✗[/bold red] Could not load default rules from '[bright_cyan]{default_rules_path_str}[/bright_cyan]': {e}[/bold red]")
-            else:
-                console.print("[yellow]ℹ️ Default rules not loaded.[/yellow]")
-            return True
-        else: # Handles empty sub_command (just "/rules") or unknown sub_command
-            console.print("[yellow]Usage: /rules <show|list|add|reset> [arguments][/yellow]")
-            console.print("[yellow]  show                - Display the current system prompt (rules).[/yellow]")
-            console.print("[yellow]  list                - List available rule files in ./.aie_rules/.[/yellow]")
-            console.print("[yellow]  add <rule-file>     - Add rules from a file to the system prompt.[/yellow]")
-            console.print("[yellow]  reset               - Reset system prompt to default, optionally load ./.aie_rules/_default.md.[/yellow]")
-            return True
-    return False
+                console.print(f"[green]✓ Added default rules from '[bright_cyan]{normalized_path}[/bright_cyan]' to the system prompt.[/green]")
+            except FileNotFoundError:
+                console.print(f"[yellow]⚠ Default rules file '[bright_cyan]{normalized_path if 'normalized_path' in locals() else default_rules_path_str}[/bright_cyan]' not found. No default rules loaded.[/yellow]")
+            except (OSError, ValueError) as e: # ValueError from normalize_path or read errors
+                console.print(f"[bold red]✗[/bold red] Could not load default rules from '[bright_cyan]{default_rules_path_str}[/bright_cyan]': {e}[/bold red]")
+        else:
+            console.print("[yellow]ℹ️ Default rules not loaded.[/yellow]")
+        return True
+    else: # Handles empty sub_command (just "/rules") or unknown sub_command
+        console.print("[yellow]Usage: /rules <show|list|add|reset> [arguments][/yellow]")
+        console.print("[yellow]  show                - Display the current system prompt (rules).[/yellow]")
+        console.print("[yellow]  list                - List available rule files in ./.aie_rules/.[/yellow]")
+        console.print("[yellow]  add <rule-file>     - Add rules from a file to the system prompt.[/yellow]")
+        console.print("[yellow]  reset               - Reset system prompt to default, optionally load ./.aie_rules/_default.md.[/yellow]")
+        return True # Handled (printed usage or processed subcommand)
 
 def try_handle_context_command(user_input: str) -> bool:
     """
     Handles /context commands (save, load, list, summarize).
     """
-    prefix = "/context "
-    # Ensure we are checking the stripped input for the prefix
-    stripped_input_lower = user_input.strip().lower()
-    if stripped_input_lower.startswith(prefix) or stripped_input_lower == "/context":
-        # Get command body relative to the actual prefix used (e.g. "/context " or "/context")
-        if stripped_input_lower.startswith(prefix): # Handles "/context <subcommand>"
-            command_body = user_input.strip()[len(prefix):].strip()
-        else: # Handles just "/context"
-            command_body = ""
+    command_prefix = "/context"
+    stripped_input = user_input.strip()
 
-        parts = command_body.split(maxsplit=1)
-        sub_command = parts[0].lower() if parts else ""
-        arg = parts[1] if len(parts) > 1 else ""
+    # Strict check
+    if not (stripped_input.lower() == command_prefix or stripped_input.lower().startswith(command_prefix + " ")):
+        return False
 
-        if sub_command == "save":
-            if not arg:
-                console.print("[yellow]Usage: /context save <name>[/yellow]")
-                return True
-            save_context(arg)
+    prefix_with_space = command_prefix + " "
+    command_body = ""
+    if stripped_input.lower().startswith(prefix_with_space):
+        command_body = stripped_input[len(prefix_with_space):].strip()
+    elif stripped_input.lower() == command_prefix: # Just "/context"
+        command_body = ""
+
+    parts = command_body.split(maxsplit=1)
+    sub_command = parts[0].lower() if parts else ""
+    arg = parts[1] if len(parts) > 1 else ""
+
+    if sub_command == "save":
+        if not arg:
+            console.print("[yellow]Usage: /context save <name>[/yellow]")
             return True
+        save_context(arg)
+        return True
 
-        elif sub_command == "load":
-            if not arg:
-                console.print("[yellow]Usage: /context load <name>[/yellow]")
-                return True
-            load_context(arg)
+    elif sub_command == "load":
+        if not arg:
+            console.print("[yellow]Usage: /context load <name>[/yellow]")
             return True
+        load_context(arg)
+        return True
 
-        elif sub_command == "list":
-            list_contexts(arg if arg else ".") # List in current dir if no path given
-            return True
+    elif sub_command == "list":
+        list_contexts(arg if arg else ".") # List in current dir if no path given
+        return True
 
-        elif sub_command == "summarize":
-            summarize_context()
-            return True
+    elif sub_command == "summarize":
+        summarize_context()
+        return True
 
-        else: # Handles empty sub_command (just "/context") or unknown sub_command
-            console.print("[yellow]Usage: /context <save|load|list|summarize> [name/path][/yellow]")
-            console.print("[yellow]  save <name>     - Save current context to a file.[/yellow]")
-            console.print("[yellow]  load <name>     - Load context from a file.[/yellow]")
-            console.print("[yellow]  list [path]     - List saved contexts in a directory.[/yellow]")
-            console.print("[yellow]  summarize       - Summarize current context using the LLM.[/yellow]")
-            return True
-    return False
+    else: # Handles empty sub_command (just "/context") or unknown sub_command
+        console.print("[yellow]Usage: /context <save|load|list|summarize> [name/path][/yellow]")
+        console.print("[yellow]  save <name>     - Save current context to a file.[/yellow]")
+        console.print("[yellow]  load <name>     - Load context from a file.[/yellow]")
+        console.print("[yellow]  list [path]     - List saved contexts in a directory.[/yellow]")
+        console.print("[yellow]  summarize       - Summarize current context using the LLM.[/yellow]")
+        return True # Handled (printed usage or processed subcommand)
 
 def try_handle_session_command(user_input: str) -> bool:
     """Handles /session commands by delegating to the /context command handler."""
@@ -755,28 +771,33 @@ def _call_llm_for_prompt_generation(user_text: str, mode: str) -> str:
 def try_handle_prompt_command(user_input: str) -> bool:
     """Handles /prompt <refine|detail> <text> commands."""
     prefix = "/prompt "
-    stripped_input_lower = user_input.strip().lower()
+    command_name_lower = "/prompt"
+    stripped_input = user_input.strip()
 
-    if stripped_input_lower.startswith(prefix) or stripped_input_lower == "/prompt":
-        command_body = user_input.strip()[len(prefix):].strip() if stripped_input_lower.startswith(prefix) else ""
-        parts = command_body.split(maxsplit=1)
-        sub_command = parts[0].lower() if parts else ""
-        text_to_process = parts[1] if len(parts) > 1 else ""
+    # Strict check
+    if not (stripped_input.lower() == command_name_lower or stripped_input.lower().startswith(prefix)):
+        return False
 
-        if sub_command in ["refine", "detail"]:
-            if not text_to_process:
-                console.print(f"[yellow]Usage: /prompt {sub_command} <text_to_{sub_command}>[/yellow]")
-                return True
-            generated_prompt = _call_llm_for_prompt_generation(text_to_process, sub_command)
-            if generated_prompt:
-                console.print(f"\n[bold blue]✨ Generated Prompt ({sub_command.capitalize()}d):[/bold blue]")
-                console.print(Panel(generated_prompt, border_style="green", expand=True, title_align="left"))
+    command_body = ""
+    if stripped_input.lower().startswith(prefix): # Check for "/prompt "
+        command_body = stripped_input[len(prefix):].strip()
+    parts = command_body.split(maxsplit=1)
+    sub_command = parts[0].lower() if parts else ""
+    text_to_process = parts[1] if len(parts) > 1 else ""
+
+    if sub_command in ["refine", "detail"]:
+        if not text_to_process:
+            console.print(f"[yellow]Usage: /prompt {sub_command} <text_to_{sub_command}>[/yellow]")
             return True
-        console.print("[yellow]Usage: /prompt <refine|detail> <text>[/yellow]")
-        console.print("[yellow]  refine <text>  - Optimizes <text> into a clearer and more effective prompt for AI Engineer.[/yellow]")
-        console.print("[yellow]  detail <text>  - Expands <text> into a more comprehensive and detailed prompt for AI Engineer.[/yellow]")
+        generated_prompt = _call_llm_for_prompt_generation(text_to_process, sub_command)
+        if generated_prompt:
+            console.print(f"\n[bold blue]✨ Generated Prompt ({sub_command.capitalize()}d):[/bold blue]")
+            console.print(Panel(generated_prompt, border_style="green", expand=True, title_align="left"))
         return True
-    return False
+    console.print("[yellow]Usage: /prompt <refine|detail> <text>[/yellow]")
+    console.print("[yellow]  refine <text>  - Optimizes <text> into a clearer and more effective prompt for AI Engineer.[/yellow]")
+    console.print("[yellow]  detail <text>  - Expands <text> into a more comprehensive and detailed prompt for AI Engineer.[/yellow]")
+    return True # Handled (printed usage or processed subcommand)
 
 def add_directory_to_conversation(directory_path: str):
     with console.status("[bold bright_blue]🔍 Scanning directory...[/bold bright_blue]") as status:
@@ -1563,65 +1584,69 @@ def try_handle_script_command(user_input: str, is_startup_script: bool = False) 
     Handles the /script <script_path> command.
     Executes a sequence of AI Engineer commands from the specified script file.
     """
-    prefix = "/script " # Changed from /init
-    command_name_lower = "/script" # Changed from /init
-    stripped_input_lower = user_input.strip().lower()
+    command_prefix = "/script"
+    stripped_input = user_input.strip()
 
-    if stripped_input_lower.startswith(prefix) or (is_startup_script and stripped_input_lower == command_name_lower):
-        script_path_arg = ""
-        if stripped_input_lower.startswith(prefix):
-            script_path_arg = user_input.strip()[len(prefix):].strip()
-        elif is_startup_script and stripped_input_lower == command_name_lower: # Case for --init without path (should not happen with current argparse)
-            # This case should ideally not be hit if --script always requires a SCRIPT_PATH
-            console.print("[yellow]Usage: /script <script_path>[/yellow]")
-            return True
+    # Strict check for interactive use; startup script is handled by the `is_startup_script` part
+    if not (stripped_input.lower() == command_prefix or stripped_input.lower().startswith(command_prefix + " ") or (is_startup_script and stripped_input.lower() == command_prefix)):
+        return False
 
-        if not script_path_arg:
-            console.print("[yellow]Usage: /script <script_path>[/yellow]")
-            console.print("[yellow]  Example: /script ./my_setup_script.aiescript[/yellow]")
-            console.print("[yellow]  The script file contains AI Engineer commands, one per line. Lines starting with '#' are comments.[/yellow]")
-            return True
-
-        try:
-            normalized_script_path = normalize_path(script_path_arg)
-            console.print(f"[bold blue]🚀 Executing script: [bright_cyan]{normalized_script_path}[/bright_cyan][/bold blue]")
-            with open(normalized_script_path, "r", encoding="utf-8") as f:
-                for line_num, line in enumerate(f, 1):
-                    stripped_line = line.strip()
-                    if not stripped_line or stripped_line.startswith("#"): # Skip empty lines and comments
-                        continue
-                    execute_script_line(stripped_line)
-            console.print(f"[bold green]✅ Script execution finished: [bright_cyan]{normalized_script_path}[/bright_cyan][/bold green]\n")
-
-        except FileNotFoundError:
-            console.print(f"[bold red]✗ Error: Script file not found at '[bright_cyan]{script_path_arg}[/bright_cyan]'[/bold red]")
-        except ValueError as e: # From normalize_path
-            console.print(f"[bold red]✗ Error: Invalid script path '[bright_cyan]{script_path_arg}[/bright_cyan]': {e}[/bold red]")
-        except Exception as e:
-            console.print(f"[bold red]✗ Error during script execution from '{script_path_arg}': {e}[/bold red]")
+    prefix_with_space = command_prefix + " "
+    script_path_arg = ""
+    if stripped_input.lower().startswith(prefix_with_space):
+        script_path_arg = stripped_input[len(prefix_with_space):].strip()
+    elif is_startup_script and stripped_input.lower() == command_prefix: # Case for --script from CLI
+        console.print("[yellow]Usage: /script <script_path>[/yellow]")
         return True
-    return False
+
+    if not script_path_arg:
+        console.print("[yellow]Usage: /script <script_path>[/yellow]")
+        console.print("[yellow]  Example: /script ./my_setup_script.aiescript[/yellow]")
+        console.print("[yellow]  The script file contains AI Engineer commands, one per line. Lines starting with '#' are comments.[/yellow]")
+        return True
+
+    try:
+        normalized_script_path = normalize_path(script_path_arg)
+        console.print(f"[bold blue]🚀 Executing script: [bright_cyan]{normalized_script_path}[/bright_cyan][/bold blue]")
+        with open(normalized_script_path, "r", encoding="utf-8") as f:
+            for line_num, line in enumerate(f, 1):
+                stripped_line = line.strip()
+                if not stripped_line or stripped_line.startswith("#"): # Skip empty lines and comments
+                    continue
+                execute_script_line(stripped_line)
+        console.print(f"[bold green]✅ Script execution finished: [bright_cyan]{normalized_script_path}[/bright_cyan][/bold green]\n")
+
+    except FileNotFoundError:
+        console.print(f"[bold red]✗ Error: Script file not found at '[bright_cyan]{script_path_arg}[/bright_cyan]'[/bold red]")
+    except ValueError as e: # From normalize_path
+        console.print(f"[bold red]✗ Error: Invalid script path '[bright_cyan]{script_path_arg}[/bright_cyan]': {e}[/bold red]")
+    except Exception as e:
+        console.print(f"[bold red]✗ Error during script execution from '{script_path_arg}': {e}[/bold red]")
+    return True # Command was handled (attempted execution or printed error/usage)
 
 def try_handle_ask_command(user_input: str) -> bool:
     """
     Handles the /ask <text> command.
     Treats the text following /ask as a user prompt to the LLM.
     """
-    prefix = "/ask "
-    command_name_lower = "/ask"
-    stripped_input_lower = user_input.strip().lower()
+    command_prefix = "/ask"
+    stripped_input = user_input.strip()
 
-    if stripped_input_lower.startswith(prefix) or stripped_input_lower == command_name_lower:
-        text_to_ask = user_input.strip()[len(command_name_lower):].strip()
+    # Strict check
+    if not (stripped_input.lower() == command_prefix or stripped_input.lower().startswith(command_prefix + " ")):
+        return False
 
-        if not text_to_ask:
-            console.print("[yellow]Usage: /ask <text>[/yellow]")
-            console.print("[yellow]  Example: /ask What is the capital of France?[/yellow]")
-            return True
-
-        stream_llm_response(text_to_ask) # Pass the text directly to the LLM
+    prefix_with_space = command_prefix + " "
+    text_to_ask = ""
+    if stripped_input.lower().startswith(prefix_with_space):
+        text_to_ask = stripped_input[len(prefix_with_space):].strip()
+    elif stripped_input.lower() == command_prefix: # Just "/ask"
+        console.print("[yellow]Usage: /ask <text>[/yellow]")
+        console.print("[yellow]  Example: /ask What is the capital of France?[/yellow]")
         return True
-    return False
+
+    stream_llm_response(text_to_ask) # Pass the text directly to the LLM
+    return True # Command was handled
 
 def try_handle_time_command(user_input: str) -> bool:
     """

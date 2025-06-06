@@ -1096,8 +1096,15 @@ class TestMainLoop:
     @patch('ai_engineer.try_handle_add_command', return_value=False) # Assume no /add commands
     @patch('ai_engineer.try_handle_script_command', return_value=False) # Mock new command handlers
     @patch('ai_engineer.try_handle_ask_command', return_value=False) # Mock new command handlers
-    @patch('ai_engineer.try_handle_time_command', return_value=False) # Mock new command handler
-    def test_main_loop_exit_quit(self, mock_handle_add, mock_stream_response, monkeypatch):
+    @patch('ai_engineer.try_handle_time_command', return_value=False) 
+    def test_main_loop_exit_quit(self, 
+                                 mock_try_time, # Add mock for try_handle_time_command
+                                 mock_try_ask,  # Add mock for try_handle_ask_command
+                                 mock_try_script, # Add mock for try_handle_script_command
+                                 mock_try_add,    # Add mock for try_handle_add_command
+                                 mock_try_prompt, # Add mock for try_handle_prompt_command
+                                 mock_stream_response, 
+                                 monkeypatch): # Keep existing mocks
         # Test 'exit'
         de.prompt_session.prompt = MagicMock(return_value="exit")
         with pytest.raises(SystemExit):
@@ -1122,9 +1129,15 @@ class TestMainLoop:
     @patch('ai_engineer.try_handle_prompt_command', return_value=False)
     @patch('ai_engineer.try_handle_script_command', return_value=False)
     @patch('ai_engineer.try_handle_ask_command', return_value=False)
-    @patch('ai_engineer.try_handle_time_command', return_value=False)
+    @patch('ai_engineer.try_handle_time_command', return_value=False) 
     @patch('ai_engineer.try_handle_add_command', return_value=False)
-    def test_main_loop_eof_keyboard_interrupt(self, mock_handle_add, mock_stream_response, monkeypatch):
+    def test_main_loop_eof_keyboard_interrupt(self, 
+                                              mock_try_add,    # Add mock for try_handle_add_command
+                                              mock_try_time, # Add mock for try_handle_time_command
+                                              mock_try_ask,  # Add mock for try_handle_ask_command
+                                              mock_try_script, # Add mock for try_handle_script_command
+                                              mock_try_prompt, # Add mock for try_handle_prompt_command
+                                              mock_stream_response, monkeypatch): # Keep existing mocks
         # Test EOFError
         de.prompt_session.prompt = MagicMock(side_effect=EOFError)
         with pytest.raises(SystemExit):
@@ -1148,9 +1161,15 @@ class TestMainLoop:
     @patch('ai_engineer.try_handle_prompt_command', return_value=False)
     @patch('ai_engineer.try_handle_script_command', return_value=False)
     @patch('ai_engineer.try_handle_ask_command', return_value=False)
-    @patch('ai_engineer.try_handle_time_command', return_value=False)
+    @patch('ai_engineer.try_handle_time_command', return_value=False) 
     @patch('ai_engineer.try_handle_add_command', return_value=False)
-    def test_main_loop_empty_and_normal_input(self, mock_handle_add, mock_stream_response, monkeypatch):
+    def test_main_loop_empty_and_normal_input(self, 
+                                              mock_try_add,    # Add mock for try_handle_add_command
+                                              mock_try_time, # Add mock for try_handle_time_command
+                                              mock_try_ask,  # Add mock for try_handle_ask_command
+                                              mock_try_script, # Add mock for try_handle_script_command
+                                              mock_try_prompt, # Add mock for try_handle_prompt_command
+                                              mock_stream_response, monkeypatch): # Keep existing mocks
         # Simulate empty input, then normal input, then exit
         de.prompt_session.prompt = MagicMock(side_effect=["", "hello", KeyboardInterrupt])
         with pytest.raises(SystemExit): # Due to KeyboardInterrupt
@@ -1164,9 +1183,15 @@ class TestMainLoop:
     @patch('ai_engineer.try_handle_prompt_command', return_value=False)
     @patch('ai_engineer.try_handle_script_command', return_value=False)
     @patch('ai_engineer.try_handle_ask_command', return_value=False)
-    @patch('ai_engineer.try_handle_time_command', return_value=False)
+    @patch('ai_engineer.try_handle_time_command', return_value=False) 
     @patch('ai_engineer.try_handle_add_command', return_value=False)
-    def test_main_loop_llm_error(self, mock_handle_add, mock_stream_response, monkeypatch):
+    def test_main_loop_llm_error(self, 
+                                 mock_try_add,    # Add mock for try_handle_add_command
+                                 mock_try_time, # Add mock for try_handle_time_command
+                                 mock_try_ask,  # Add mock for try_handle_ask_command
+                                 mock_try_script, # Add mock for try_handle_script_command
+                                 mock_try_prompt, # Add mock for try_handle_prompt_command
+                                 mock_stream_response, monkeypatch): # Keep existing mocks
         # Simulate normal input, then LLM error, then exit
         de.prompt_session.prompt = MagicMock(side_effect=["ask something", KeyboardInterrupt])
         with pytest.raises(SystemExit): # Due to KeyboardInterrupt
@@ -1184,11 +1209,19 @@ class TestMainLoop:
     @patch('ai_engineer.get_config_value') # Mock get_config_value
     @patch('ai_engineer.get_model_context_window', return_value=(8000, False)) # Mock context window
     @patch('ai_engineer.try_handle_script_command', return_value=False) # Mock new command handlers
+    @patch('ai_engineer.try_handle_prompt_command', return_value=False) # Add this missing mock
     @patch('ai_engineer.try_handle_ask_command', return_value=False) # Mock new command handlers
-    @patch('ai_engineer.try_handle_time_command', return_value=False) # Mock new command handler
+    @patch('ai_engineer.try_handle_time_command', return_value=False) 
     @patch('ai_engineer.stream_llm_response', return_value={"success": True}) # Mock LLM response
     def test_main_loop_prompt_prefix_context_usage(
-        self, mock_stream_llm, mock_get_model_window, mock_get_config, mock_token_counter, mock_prompt_session_obj, monkeypatch
+        self, mock_stream_llm, 
+        mock_try_time, # Add mock for try_handle_time_command
+        mock_try_ask,  # Add mock for try_handle_ask_command
+        mock_try_prompt, # Add mock for try_handle_prompt_command
+        mock_try_script, # Add mock for try_handle_script_command
+        mock_get_model_window, mock_get_config, 
+        mock_token_counter, mock_prompt_session_obj, 
+        monkeypatch
     ):
         # Simulate a sequence of inputs: first a normal input, then KeyboardInterrupt to exit
         mock_prompt_session_obj.prompt = MagicMock(side_effect=["hello", KeyboardInterrupt])
@@ -1264,27 +1297,38 @@ This is a prompt to the LLM from the script.
     @patch('ai_engineer.console.print')
     def test_try_handle_script_command_no_arg(self, mock_console_print): # Renamed
         handled = de.try_handle_script_command("/script") # Renamed
-        assert handled
+        assert handled is True # try_handle_script_command should return True when printing usage
         mock_console_print.assert_any_call("[yellow]Usage: /script <script_path>[/yellow]")
 
     @patch('ai_engineer.try_handle_add_command')
     @patch('ai_engineer.stream_llm_response')
     def test_execute_script_line_calls_correct_handlers(self, mock_stream_llm, mock_handle_add):
         # Test /add command
+        mock_handle_add.return_value = True # Simulate it handled the /add command
         de.execute_script_line("/add test.txt")
         mock_handle_add.assert_called_once_with("/add test.txt")
         mock_stream_llm.assert_not_called()
+        
         mock_handle_add.reset_mock()
+        mock_stream_llm.reset_mock()
 
         # Test LLM prompt
+        mock_handle_add.return_value = False # Simulate it did NOT handle "This is a prompt"
         de.execute_script_line("This is a prompt")
+        
+        mock_handle_add.assert_called_once_with("This is a prompt") # It IS called
         mock_stream_llm.assert_called_once_with("This is a prompt")
-        mock_handle_add.assert_not_called()
 
     @patch('argparse.ArgumentParser.parse_args')
     @patch('ai_engineer.try_handle_script_command') # Renamed
     @patch('ai_engineer.prompt_session') # For confirmation
-    def test_main_cli_script_with_confirmation_yes(self, mock_prompt_session, mock_try_script, mock_parse_args, temp_script_file, monkeypatch): # Renamed
+    @patch('ai_engineer.clear_screen') # Mock clear_screen to avoid issues in test
+    @patch('ai_engineer.Console.print') # Mock console.print for welcome panel
+    def test_main_cli_script_with_confirmation_yes(self, 
+                                                 mock_rich_console_print, # For welcome panel
+                                                 mock_clear_screen, 
+                                                 mock_prompt_session, 
+                                                 mock_try_script, mock_parse_args, temp_script_file, monkeypatch): # Renamed
         mock_args = MagicMock()
         mock_args.script = str(temp_script_file) # Changed from init
         mock_args.noconfirm = False
@@ -1293,7 +1337,10 @@ This is a prompt to the LLM from the script.
         mock_prompt_session.prompt.return_value = "y" # User confirms
 
         # Mock the interactive loop part to prevent it from running
-        monkeypatch.setattr(de.prompt_session, 'prompt', MagicMock(side_effect=["hello", KeyboardInterrupt])) # Simulate one input then exit
+        # We need to ensure the confirmation prompt is handled by the original mock_prompt_session.prompt
+        # and then the main loop prompt is handled by a different mock or side_effect.
+        # For simplicity, let the main loop's prompt_session.prompt raise KeyboardInterrupt immediately after the confirmation.
+        mock_prompt_session.prompt.side_effect = ["y", KeyboardInterrupt] # First call for confirmation, second for main loop
         
         with pytest.raises(SystemExit): # Main loop will exit due to KeyboardInterrupt
             de.main()

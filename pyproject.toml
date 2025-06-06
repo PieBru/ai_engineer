@@ -5,21 +5,21 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "litellm",
-    "prompt-toolkit>=3.0.50",
-    "pydantic>=2.10.4",
-    "python-dotenv>=1.0.1",
-    "rich>=13.9.4",
-    "httpx",
-    "markdown",
+    "litellm>=1.72.0",
+    "prompt-toolkit>=3.0.51",
+    "pydantic>=2.11.5", # As seen in requirements.txt
+    "python-dotenv>=1.1.0", # As seen in requirements.txt
+    "rich>=14.0.0",     # As seen in requirements.txt
+    "httpx>=0.28.1",    # As seen in requirements.txt
+    "markdown>=3.8",    # As seen in requirements.txt
 ]
 
 [project.optional-dependencies] # Dependencies required for development and testing
 test = [
     "pytest>=8.4.0", # As seen in your pytest output
-    "pytest-cov>=5.0.0", # Add pytest-cov for coverage integration
-    "flask",
-    "toml",
+    "pytest-cov>=6.1.1", # Updated from requirements.txt
+    "flask>=3.1.1",      # From requirements.txt
+    "toml>=0.10.2",      # From requirements.txt
 ]
 
 [tool.pytest.ini_options]
