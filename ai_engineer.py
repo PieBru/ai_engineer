@@ -473,11 +473,47 @@ def try_handle_rules_command(user_input: str) -> bool:
                 console.print(f"[bold red]✗[/bold red] Could not add rules from '[bright_cyan]{arg}[/bright_cyan]': {e}[/bold red]")
             return True
 
+        elif sub_command == "reset":
+            if conversation_history and conversation_history[0]["role"] == "system":
+                # Reset to the imported default system_PROMPT
+                conversation_history[0]["content"] = "" # Empties the system prompt
+                # Clear any runtime override for system_prompt file path
+                RUNTIME_OVERRIDES.pop("system_prompt", None)
+                console.print("[green]✓ System prompt emptied.[/green]")
+            else:
+                console.print("[yellow]Warning: Could not find system prompt in history to reset.[/yellow]")
+                # Initialize if somehow missing (should not happen in normal flow)
+                conversation_history.insert(0, {"role": "system", "content": system_PROMPT})
+
+            default_rules_dir = Path("./.aie_rules/")
+            default_rules_file_name = "_default.md"
+            default_rules_path = default_rules_dir / default_rules_file_name
+            default_rules_path_str = str(default_rules_path)
+
+            confirmation = prompt_session.prompt(
+                f"Load default rules from '[bright_cyan]{default_rules_path_str}[/bright_cyan]'? [Y/n]: ",
+                default="y"
+            ).strip().lower()
+
+            if confirmation in ["y", "yes", ""]:
+                try:
+                    normalized_path = normalize_path(default_rules_path_str) # Normalizes and checks existence implicitly via read
+                    rule_content = util_read_local_file(normalized_path)
+                    conversation_history[0]["content"] += f"\n\n## Additional Rules from {normalized_path}:\n\n{rule_content}"
+                    console.print(f"[green]✓ Added default rules from '[bright_cyan]{normalized_path}[/bright_cyan]' to the system prompt.[/green]")
+                except FileNotFoundError:
+                    console.print(f"[yellow]⚠ Default rules file '[bright_cyan]{normalized_path if 'normalized_path' in locals() else default_rules_path_str}[/bright_cyan]' not found. No default rules loaded.[/yellow]")
+                except (OSError, ValueError) as e: # ValueError from normalize_path or read errors
+                    console.print(f"[bold red]✗[/bold red] Could not load default rules from '[bright_cyan]{default_rules_path_str}[/bright_cyan]': {e}[/bold red]")
+            else:
+                console.print("[yellow]ℹ️ Default rules not loaded.[/yellow]")
+            return True
         else: # Handles empty sub_command (just "/rules") or unknown sub_command
-            console.print("[yellow]Usage: /rules <show|list|add> [arguments][/yellow]")
-            console.print("[yellow]  show          - Display the current system prompt (rules).[/yellow]")
-            console.print("[yellow]  list          - List available rule files in ./.aie_rules/.[/yellow]")
-            console.print("[yellow]  add <rule-file> - Add rules from a markdown file to the system prompt.[/yellow]")
+            console.print("[yellow]Usage: /rules <show|list|add|reset> [arguments][/yellow]")
+            console.print("[yellow]  show                - Display the current system prompt (rules).[/yellow]")
+            console.print("[yellow]  list                - List available rule files in ./.aie_rules/.[/yellow]")
+            console.print("[yellow]  add <rule-file>     - Add rules from a file to the system prompt.[/yellow]")
+            console.print("[yellow]  reset               - Reset system prompt to default, optionally load ./.aie_rules/_default.md.[/yellow]")
             return True
     return False
 

@@ -199,6 +199,7 @@ You> Now review this codebase structure
     *   `show`: Display the current system prompt (rules) being used.
     *   `list`: List available rule files in the `./.aie_rules/` directory.
     *   `add <rule-file>`: Add rules from a specified markdown file to the current session's system prompt.
+    *   `reset`: Empties the current system prompt, then asks for confirmation (Y/n, default Y) to load default rules from `./.aie_rules/_default.md`. If confirmed, it effectively runs `rules add _default.md`.
 
 ### **High-Level Architecture**
 The following diagram illustrates the main components and their interactions within AI Engineer:
