@@ -33,7 +33,7 @@ LITELLM_API_BASE = os.getenv("LITELLM_API_BASE", DEFAULT_LITELLM_API_BASE)
 LITELLM_MAX_TOKENS = int(os.getenv("LITELLM_MAX_TOKENS", DEFAULT_LITELLM_MAX_TOKENS))
 REASONING_EFFORT = os.getenv("REASONING_EFFORT", DEFAULT_REASONING_EFFORT)
 REASONING_STYLE = os.getenv("REASONING_STYLE", DEFAULT_REASONING_STYLE)
-import json
+import json # Needed for context save/load, and risky tool preview
 from pathlib import Path
 import sys # Keep sys for exit
 from pydantic import BaseModel, ConfigDict
@@ -64,6 +64,14 @@ from src.file_utils import (
 )
 from src.tool_defs import tools, RISKY_TOOLS
 from src.prompts import system_PROMPT, RichMarkdown # Moved RichMarkdown import here
+from src.data_models import FileToCreate, FileToEdit # Import new models
+from src.network_utils import handle_local_mcp_stream, handle_remote_mcp_sse # Import network utils
+# Import new modules for refactored logic
+from src.file_context_utils import (
+    add_directory_to_conversation,
+    ensure_file_in_context
+)
+from src.llm_interaction import stream_llm_response # Removed execute_function_call_dict, trim_conversation_history
 from prompt_toolkit.styles import Style as PromptStyle
 from litellm import completion, token_counter
 import litellm 
@@ -87,121 +95,8 @@ load_app_configuration(console)
 litellm.suppress_debug_info = True
 logging.getLogger("litellm").setLevel(logging.WARNING)
 
-class FileToCreate(BaseModel):
-    path: str
-    content: str
-    model_config = ConfigDict(extra='ignore', frozen=True)
-
-class FileToEdit(BaseModel):
-    path: str
-    original_snippet: str
-    new_snippet: str
-    model_config = ConfigDict(extra='ignore', frozen=True)
-
 # ... (Keep _handle_local_mcp_stream, _handle_remote_mcp_sse, and all try_handle_* command functions as they are) ...
 # ... (No changes to these helper functions from the previous full file content)
-def _handle_local_mcp_stream(endpoint_url: str, timeout_seconds: int, max_data_chars: int) -> str:
-    """
-    Connects to a local MCP server endpoint that provides a streaming response.
-    Reads the stream and returns the aggregated data.
-    """
-    try:
-        parsed_url = httpx.URL(endpoint_url)
-        if not (parsed_url.host.lower() in ("localhost", "127.0.0.1") and parsed_url.scheme.lower() in ("http", "https")):
-             return f"Error: For connect_local_mcp_stream, endpoint_url must be for localhost (http or https). Provided: {endpoint_url}"
-    except httpx.UnsupportedProtocol:
-         return f"Error: Invalid or unsupported URL scheme for local MCP stream: {endpoint_url}"
-    except Exception as e_val: # Catch other potential parsing errors
-        return f"Error validating local MCP stream URL '{endpoint_url}': {str(e_val)}"
-
-    data_buffer = []
-    chars_read = 0
-    timeout_config = httpx.Timeout(timeout_seconds, read=timeout_seconds)
-
-    try:
-        with httpx.Client(timeout=timeout_config) as client:
-            with client.stream("GET", endpoint_url) as response:
-                response.raise_for_status()
-                for chunk in response.iter_text():
-                    if chars_read + len(chunk) > max_data_chars:
-                        remaining_len = max_data_chars - chars_read
-                        data_buffer.append(chunk[:remaining_len])
-                        data_buffer.append("... (data truncated)")
-                        chars_read = max_data_chars
-                        break
-                    data_buffer.append(chunk)
-                    chars_read += len(chunk)
-        return "".join(data_buffer)
-    except httpx.HTTPStatusError as e:
-        error_detail = f"HTTP {e.response.status_code}"
-        try:
-            e.response.read()
-            error_detail += f" - {e.response.text[:200]}"
-        except httpx.ResponseNotRead:
-            error_detail += " - (Error response body could not be read for details)"
-        except Exception:
-            error_detail += " - (Failed to retrieve error response body details)"
-        return f"Error connecting to local MCP stream '{endpoint_url}': {error_detail}"
-    except httpx.RequestError as e:
-        return f"Error connecting to local MCP stream '{endpoint_url}': {str(e)}"
-    except Exception as e:
-        return f"An unexpected error occurred with local MCP stream '{endpoint_url}': {str(e)}"
-
-def _handle_remote_mcp_sse(endpoint_url: str, max_events: int, listen_timeout_seconds: int) -> str:
-    """
-    Connects to a remote MCP server endpoint using Server-Sent Events (SSE).
-    Listens for events and returns a summary of received events.
-    """
-    try:
-        parsed_url = httpx.URL(endpoint_url)
-        if parsed_url.scheme.lower() not in ("http", "https"):
-            return f"Error: For connect_remote_mcp_sse, endpoint_url must be a valid HTTP/HTTPS URL. Provided: {endpoint_url}"
-    except httpx.UnsupportedProtocol:
-        return f"Error: Invalid or unsupported URL scheme for remote MCP SSE: {endpoint_url}"
-    except Exception as e_val:
-        return f"Error validating remote MCP SSE URL '{endpoint_url}': {str(e_val)}"
-
-    events_received = []
-    timeout_config = httpx.Timeout(listen_timeout_seconds, read=listen_timeout_seconds)
-
-    try:
-        with httpx.Client(timeout=timeout_config) as client:
-            with client.stream("GET", endpoint_url, headers={"Accept": "text/event-stream"}) as response:
-                response.raise_for_status()
-                if "text/event-stream" not in response.headers.get("Content-Type", "").lower():
-                    return f"Error: Endpoint '{endpoint_url}' did not return 'text/event-stream' content type. Got: {response.headers.get('Content-Type')}"
-
-                current_event_data = []
-                for line in response.iter_lines():
-                    if not line:
-                        if current_event_data:
-                            events_received.append("".join(current_event_data))
-                            current_event_data = []
-                            if len(events_received) >= max_events:
-                                break
-                    elif line.startswith("data:"):
-                        current_event_data.append(line[5:].strip() + "\n")
-
-                if current_event_data and len(events_received) < max_events:
-                    events_received.append("".join(current_event_data).strip())
-
-        summary = f"Received {len(events_received)} SSE event(s) from '{endpoint_url}'.\n"
-        summary += "Last few events:\n" + "\n---\n".join(events_received[-5:])
-        return summary
-    except httpx.HTTPStatusError as e:
-        error_detail = f"HTTP {e.response.status_code}"
-        try:
-            e.response.read()
-            error_detail += f" - {e.response.text[:200]}"
-        except httpx.ResponseNotRead:
-            error_detail += " - (Error response body could not be read for details)"
-        except Exception:
-            error_detail += " - (Failed to retrieve error response body details)"
-        return f"Error connecting to remote MCP SSE '{endpoint_url}': {error_detail}"
-    except httpx.RequestError as e:
-        return f"Error connecting to remote MCP SSE '{endpoint_url}': {str(e)}"
-    except Exception as e:
-        return f"An unexpected error occurred with remote MCP SSE '{endpoint_url}': {str(e)}"
 
 def try_handle_add_command(user_input: str) -> bool:
     command_prefix = "/add"
@@ -217,7 +112,7 @@ def try_handle_add_command(user_input: str) -> bool:
     if not path_to_add:
         console.print("[yellow]Usage: /add <file_path_or_folder_path>[/yellow]")
         console.print("[yellow]  Example: /add src/my_file.py[/yellow]")
-        console.print("[yellow]  Example: /add ./my_project_folder[/yellow]")
+        console.print("[yellow]  Example: /add ./my_project_folder[/yellow]") # Keep this line
         return True
     try:
         normalized_path = normalize_path(path_to_add)
@@ -225,7 +120,7 @@ def try_handle_add_command(user_input: str) -> bool:
             add_directory_to_conversation(normalized_path)
         else:
             content = util_read_local_file(normalized_path)
-            conversation_history.append({
+            conversation_history.append({ # type: ignore
                 "role": "system",
                 "content": f"Content of file '{normalized_path}':\n\n{content}"
             })
@@ -350,10 +245,10 @@ def try_handle_shell_command(user_input: str) -> bool:
         if error_output:
             console.print(f"[red]Stderr:[/red]\n{error_output}")
         if return_code != 0:
-            console.print(f"[red]Command exited with non-zero status code: {return_code}[/red]")
+            console.print(f"[red]Command exited with non-zero status code: {return_code}[/red]") # Keep this line
         history_content = f"Shell command executed: '{command_body}'\n\n"
         if output:
-            history_content += f"Stdout:\n```\n{output}\n```\n"
+            history_content += f"Stdout:\n```\n{output}\n```\n" # Keep this line
         if error_output:
             history_content += f"Stderr:\n```\n{error_output}\n```\n"
         if return_code != 0:
@@ -664,101 +559,6 @@ def try_handle_prompt_command(user_input: str) -> bool:
     console.print("[yellow]  detail <text>  - Expands <text> into a more comprehensive and detailed prompt for AI Engineer.[/yellow]")
     return True
 
-def add_directory_to_conversation(directory_path: str):
-    with console.status("[bold bright_blue]🔍 Scanning directory...[/bold bright_blue]") as status:
-        excluded_files = {
-            ".DS_Store", "Thumbs.db", ".gitignore", ".python-version",
-            "uv.lock", ".uv", "uvenv", ".uvenv", ".venv", "venv",
-            "__pycache__", ".pytest_cache", ".coverage", ".mypy_cache",
-            "node_modules", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
-            ".next", ".nuxt", "dist", "build", ".cache", ".parcel-cache",
-            ".turbo", ".vercel", ".output", ".contentlayer",
-            "out", "coverage", ".nyc_output", "storybook-static",
-            ".env", ".env.local", ".env.development", ".env.production",
-            ".git", ".svn", ".hg", "CVS"
-        }
-        excluded_extensions = {
-            ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".webp", ".avif",
-            ".mp4", ".webm", ".mov", ".mp3", ".wav", ".ogg",
-            ".zip", ".tar", ".gz", ".7z", ".rar",
-            ".exe", ".dll", ".so", ".dylib", ".bin",
-            ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-            ".pyc", ".pyo", ".pyd", ".egg", ".whl",
-            ".uv", ".uvenv",
-            ".db", ".sqlite", ".sqlite3", ".log",
-            ".idea", ".vscode",
-            ".map", ".chunk.js", ".chunk.css",
-            ".min.js", ".min.css", ".bundle.js", ".bundle.css",
-            ".cache", ".tmp", ".temp",
-            ".ttf", ".otf", ".woff", ".woff2", ".eot"
-        }
-        skipped_files = []
-        added_files = []
-        total_files_processed = 0
-        for root, dirs, files in os.walk(directory_path):
-            if total_files_processed >= MAX_FILES_TO_PROCESS_IN_DIR:
-                console.print(f"[bold yellow]⚠[/bold yellow] Reached maximum file limit ({MAX_FILES_TO_PROCESS_IN_DIR})")
-                break
-            status.update(f"[bold bright_blue]🔍 Scanning {root}...[/bold bright_blue]")
-            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in excluded_files]
-            for file in files:
-                if total_files_processed >= MAX_FILES_TO_PROCESS_IN_DIR:
-                    break
-                if file.startswith('.') or file in excluded_files:
-                    skipped_files.append(str(Path(root) / file))
-                    continue
-                _, ext = os.path.splitext(file)
-                if ext.lower() in excluded_extensions:
-                    skipped_files.append(os.path.join(root, file))
-                    continue
-                full_path = str(Path(root) / file)
-                try:
-                    if os.path.getsize(full_path) > MAX_FILE_SIZE_BYTES:
-                        skipped_files.append(f"{full_path} (exceeds size limit)")
-                        continue
-                    if is_binary_file(full_path):
-                        skipped_files.append(full_path)
-                        continue
-                    normalized_path = normalize_path(full_path)
-                    content = util_read_local_file(normalized_path)
-                    conversation_history.append({
-                        "role": "system",
-                        "content": f"Content of file '{normalized_path}':\n\n{content}"
-                    })
-                    added_files.append(normalized_path)
-                    total_files_processed += 1
-                except OSError:
-                    skipped_files.append(str(full_path))
-                except ValueError as e:
-                     skipped_files.append(f"{full_path} (Invalid path: {e})")
-        console.print(f"[bold blue]✓[/bold blue] Added folder '[bright_cyan]{directory_path}[/bright_cyan]' to conversation.")
-        if added_files:
-            console.print(f"\n[bold bright_blue]📁 Added files:[/bold bright_blue] [dim]({len(added_files)} of {total_files_processed})[/dim]")
-            for f_path in added_files:
-                console.print(f"  [bright_cyan]📄 {f_path}[/bright_cyan]")
-        if skipped_files:
-            console.print(f"\n[bold yellow]⏭ Skipped files:[/bold yellow] [dim]({len(skipped_files)})[/dim]")
-            for f_path in skipped_files[:10]:
-                console.print(f"  [yellow dim]⚠ {f_path}[/yellow dim]")
-            if len(skipped_files) > 10:
-                console.print(f"  [dim]... and {len(skipped_files) - 10} more[/dim]")
-        console.print()
-
-def ensure_file_in_context(file_path: str) -> bool:
-    try:
-        normalized_path = normalize_path(file_path)
-        content = util_read_local_file(normalized_path)
-        file_marker = f"Content of file '{normalized_path}'"
-        if not any(file_marker in msg["content"] for msg in conversation_history if msg.get("content")):
-            conversation_history.append({
-                "role": "system",
-                "content": f"{file_marker}:\n\n{content}"
-            })
-        return True
-    except (OSError, ValueError) as e:
-        console.print(f"[bold red]✗[/bold red] Could not read file '[bright_cyan]{file_path}[/bright_cyan]' for editing context: {e}")
-        return False
-
 # --------------------------------------------------------------------------------
 # 5. Conversation state
 # --------------------------------------------------------------------------------
@@ -769,325 +569,6 @@ conversation_history = [
 # --------------------------------------------------------------------------------
 # 6. LLM API interaction with streaming
 # --------------------------------------------------------------------------------
-
-def execute_function_call_dict(tool_call_dict) -> str:
-    function_name = "unknown_function"
-    try:
-        function_name = tool_call_dict["function"]["name"]
-        arguments = json.loads(tool_call_dict["function"]["arguments"])
-        if function_name == "read_file":
-            file_path = arguments["file_path"]
-            normalized_path = normalize_path(file_path)
-            content = util_read_local_file(normalized_path)
-            return f"Content of file '{normalized_path}':\n\n{content}"
-        elif function_name == "read_multiple_files":
-            file_paths = arguments["file_paths"]
-            results = []
-            for file_path in file_paths:
-                try:
-                    normalized_path = normalize_path(file_path)
-                    content = util_read_local_file(normalized_path)
-                    results.append(f"Content of file '{normalized_path}':\n\n{content}")
-                except (OSError, ValueError) as e:
-                    results.append(f"Error reading '{file_path}': {e}")
-            return "\n\n" + "="*50 + "\n\n".join(results)
-        elif function_name == "create_file":
-            file_path = arguments["file_path"]
-            content = arguments["content"]
-            util_create_file(file_path, content, console, MAX_FILE_SIZE_BYTES)
-            return f"Successfully created file '{file_path}'"
-        elif function_name == "create_multiple_files":
-            files_to_create_data = arguments.get("files", [])
-            successful_paths = []
-            success_messages_for_result = []
-            first_error_detail_for_return = None
-            for file_info_data in files_to_create_data:
-                path = file_info_data.get("path", "unknown_path")
-                content = file_info_data.get("content", "")
-                try:
-                    util_create_file(path, content, console, MAX_FILE_SIZE_BYTES)
-                    successful_paths.append(path)
-                    success_messages_for_result.append(f"File {path} created.")
-                except Exception as e_create:
-                    console.print(f"[red]Error creating file {path}: {str(e_create)}[/red]")
-                    if not first_error_detail_for_return:
-                        first_error_detail_for_return = f"Error during create_multiple_files: {str(e_create)}"
-            if first_error_detail_for_return:
-                return "\n".join(success_messages_for_result) + "\n" + first_error_detail_for_return if success_messages_for_result else first_error_detail_for_return
-            return f"Successfully created {len(successful_paths)} files: {', '.join(successful_paths)}"
-        elif function_name == "edit_file":
-            file_path = arguments["file_path"]
-            original_snippet = arguments["original_snippet"]
-            new_snippet = arguments["new_snippet"]
-            if not ensure_file_in_context(file_path):
-                return f"Error: Could not read file '{file_path}' for editing"
-            util_apply_diff_edit(file_path, original_snippet, new_snippet, console, MAX_FILE_SIZE_BYTES)
-            return f"Successfully edited file '{file_path}'"
-        elif function_name == "connect_local_mcp_stream":
-            endpoint_url = arguments["endpoint_url"]
-            timeout_seconds = arguments.get("timeout_seconds", 30)
-            max_data_chars = arguments.get("max_data_chars", 10000)
-            try:
-                parsed_url = httpx.URL(endpoint_url)
-                if not (parsed_url.host.lower() in ("localhost", "127.0.0.1") and parsed_url.scheme.lower() in ("http", "https")):
-                     return f"Error: For connect_local_mcp_stream, endpoint_url must be for localhost (http or https). Provided: {endpoint_url}"
-            except Exception as e_val:
-                return f"Error validating local MCP stream URL '{endpoint_url}' before execution: {str(e_val)}"
-            return _handle_local_mcp_stream(endpoint_url, timeout_seconds, max_data_chars)
-        elif function_name == "connect_remote_mcp_sse":
-            endpoint_url = arguments["endpoint_url"]
-            max_events = arguments.get("max_events", 10)
-            listen_timeout_seconds = arguments.get("listen_timeout_seconds", 60)
-            try:
-                parsed_url = httpx.URL(endpoint_url)
-                if parsed_url.scheme.lower() not in ("http", "https"):
-                    return f"Error: For connect_remote_mcp_sse, endpoint_url must be a valid HTTP/HTTPS URL. Provided: {endpoint_url}"
-            except Exception as e_val:
-                return f"Error validating remote MCP SSE URL '{endpoint_url}' before execution: {str(e_val)}"
-            return _handle_remote_mcp_sse(endpoint_url, max_events, listen_timeout_seconds)
-        else:
-            return f"Unknown function: {function_name}"
-    except Exception as e:
-        error_message = f"Error executing {function_name}: {str(e)}"
-        console.print(f"[red]{error_message}[/red]")
-        return error_message
-
-def trim_conversation_history():
-    if len(conversation_history) <= 20:
-        return
-    system_msgs = [msg for msg in conversation_history if msg["role"] == "system"]
-    other_msgs = [msg for msg in conversation_history if msg["role"] != "system"]
-    if len(other_msgs) > 15:
-        other_msgs = other_msgs[-15:]
-    conversation_history.clear()
-    conversation_history.extend(system_msgs + other_msgs)
-
-def stream_llm_response(user_message: str):
-    trim_conversation_history()
-    try:
-        messages_for_api_call = copy.deepcopy(conversation_history)
-        default_reply_effort_val = "medium"
-        default_temperature_val = 0.7
-        model_name = get_config_value("model", DEFAULT_LITELLM_MODEL)
-        api_base_url = get_config_value("api_base", DEFAULT_LITELLM_API_BASE)
-        reasoning_style = str(get_config_value("reasoning_style", DEFAULT_REASONING_STYLE)).lower()
-        max_tokens_raw = get_config_value("max_tokens", DEFAULT_LITELLM_MAX_TOKENS)
-        try:
-            max_tokens = int(max_tokens_raw)
-            if max_tokens <= 0:
-                max_tokens = DEFAULT_LITELLM_MAX_TOKENS
-        except (ValueError, TypeError):
-            max_tokens = DEFAULT_LITELLM_MAX_TOKENS
-        temperature_raw = get_config_value("temperature", default_temperature_val)
-        try:
-            temperature = float(temperature_raw)
-        except (ValueError, TypeError):
-            console.print(f"[yellow]Warning: Invalid temperature value '{temperature_raw}'. Using default {default_temperature_val}.[/yellow]")
-            temperature = default_temperature_val
-        reasoning_effort_setting = str(get_config_value("reasoning_effort", DEFAULT_REASONING_EFFORT)).lower()
-        reply_effort_setting = str(get_config_value("reply_effort", default_reply_effort_val)).lower()
-        effort_instructions = (
-            f"\n\n[System Instructions For This Turn Only]:\n"
-            f"- Current `reasoning_effort`: {reasoning_effort_setting}\n"
-            f"- Current `reply_effort`: {reply_effort_setting}\n"
-            f"Please adhere to these specific effort levels for your reasoning and reply in this turn."
-        )
-        augmented_user_message_content = user_message + effort_instructions
-        messages_for_api_call.append({
-            "role": "user",
-            "content": augmented_user_message_content
-        })
-        console.print("\n[bold bright_blue]🐋 Seeking...[/bold bright_blue]")
-        reasoning_content_accumulated = ""
-        final_content = ""
-        tool_calls = []
-        reasoning_started_printed = False
-        stream = completion(
-            model=model_name,
-            messages=messages_for_api_call,
-            tools=tools,
-            max_tokens=max_tokens,
-            api_base=api_base_url,
-            temperature=temperature,
-            stream=True
-        )
-        for chunk in stream:
-            if hasattr(chunk.choices[0].delta, 'reasoning_content') and chunk.choices[0].delta.reasoning_content:
-                reasoning_chunk_content = chunk.choices[0].delta.reasoning_content
-                reasoning_content_accumulated += reasoning_chunk_content
-                if reasoning_style == "full":
-                    if not reasoning_started_printed:
-                        console.print("\n[bold blue]💭 Reasoning:[/bold blue]")
-                        reasoning_started_printed = True
-                    console.print(reasoning_chunk_content, end="")
-                elif reasoning_style == "compact":
-                    if not reasoning_started_printed:
-                        console.print("\n[bold blue]💭 Reasoning...[/bold blue]", end="")
-                        reasoning_started_printed = True
-                    console.print(".", end="")
-            elif chunk.choices[0].delta.content:
-                if reasoning_started_printed and reasoning_style != "full":
-                    console.print()
-                    reasoning_started_printed = False
-                if not final_content:
-                    console.print("\n\n[bold bright_blue]🤖 Assistant>[/bold bright_blue] ", end="")
-                final_content += chunk.choices[0].delta.content
-                console.print(chunk.choices[0].delta.content, end="")
-            elif chunk.choices[0].delta.tool_calls:
-                if reasoning_started_printed and reasoning_style != "full":
-                    console.print()
-                    reasoning_started_printed = False
-                for tool_call_delta in chunk.choices[0].delta.tool_calls:
-                    if tool_call_delta.index is not None:
-                        while len(tool_calls) <= tool_call_delta.index:
-                            tool_calls.append({
-                                "id": "",
-                                "type": "function",
-                                "function": {"name": "", "arguments": ""}
-                            })
-                        if tool_call_delta.id:
-                            tool_calls[tool_call_delta.index]["id"] = tool_call_delta.id
-                        if tool_call_delta.function:
-                            if tool_call_delta.function.name:
-                                tool_calls[tool_call_delta.index]["function"]["name"] += tool_call_delta.function.name
-                            if tool_call_delta.function.arguments:
-                                tool_calls[tool_call_delta.index]["function"]["arguments"] += tool_call_delta.function.arguments
-        if reasoning_started_printed and reasoning_style == "compact" and not final_content and not tool_calls:
-            console.print()
-        console.print()
-        conversation_history.append({"role": "user", "content": user_message})
-        assistant_message = {
-            "role": "assistant",
-            "content": final_content if final_content else None
-        }
-        if reasoning_content_accumulated:
-            assistant_message["reasoning_content_full"] = reasoning_content_accumulated
-        if tool_calls:
-            formatted_tool_calls = []
-            for i, tc in enumerate(tool_calls):
-                if tc["function"]["name"]:
-                    tool_id = tc["id"] if tc["id"] else f"call_{i}_{int(time.time() * 1000)}"
-                    formatted_tool_calls.append({
-                        "id": tool_id,
-                        "type": "function",
-                        "function": {
-                            "name": tc["function"]["name"],
-                            "arguments": tc["function"]["arguments"]
-                        }
-                    })
-            if formatted_tool_calls:
-                if not final_content:
-                    assistant_message["content"] = None
-                assistant_message["tool_calls"] = formatted_tool_calls
-                conversation_history.append(assistant_message)
-                console.print(f"\n[bold bright_cyan]⚡ Executing {len(formatted_tool_calls)} function call(s)...[/bold bright_cyan]")
-                executed_tool_call_ids_and_results = []
-                for tool_call in formatted_tool_calls:
-                    tool_name = tool_call['function']['name']
-                    console.print(f"[bright_blue]→ {tool_name}[/bright_blue]")
-                    user_confirmed_or_not_risky = True
-                    if tool_name in RISKY_TOOLS:
-                        console.print(f"[bold yellow]⚠️ This is a risky operation: {tool_name}[/bold yellow]")
-                        try:
-                            args = json.loads(tool_call['function']['arguments'])
-                        except json.JSONDecodeError:
-                            console.print("[red]Error: Could not parse tool arguments.[/red]")
-                            executed_tool_call_ids_and_results.append({
-                                "role": "tool",
-                                "tool_call_id": tool_call["id"],
-                                "content": f"Error: Could not parse arguments for {tool_name}"
-                            })
-                            continue
-                        if tool_name == "create_file":
-                            console.print(f"   Action: Create/overwrite file '{args.get('file_path')}'")
-                            content_summary = args.get('content', '')[:100] + "..." if len(args.get('content', '')) > 100 else args.get('content', '')
-                            console.print(Panel(content_summary, title="Content Preview", border_style="yellow", expand=False))
-                        elif tool_name == "create_multiple_files":
-                            files_to_create_preview = args.get('files', [])
-                            if files_to_create_preview:
-                                file_paths = [f.get('path', 'unknown') for f in files_to_create_preview]
-                                console.print(f"   Action: Create/overwrite {len(file_paths)} files: {', '.join(file_paths[:5])}{'...' if len(file_paths) > 5 else ''}")
-                            else:
-                                console.print("   Action: Create multiple files (none specified).")
-                        elif tool_name == "edit_file":
-                            console.print(f"   Action: Edit file '{args.get('file_path')}'")
-                            original_snippet_summary = args.get('original_snippet', '')[:70] + "..." if len(args.get('original_snippet', '')) > 70 else args.get('original_snippet', '')
-                            new_snippet_summary = args.get('new_snippet', '')[:70] + "..." if len(args.get('new_snippet', '')) > 70 else args.get('new_snippet', '')
-                            diff_table = Table(show_header=False, box=None, padding=0)
-                            diff_table.add_row("[red]- Original:[/red]", original_snippet_summary)
-                            diff_table.add_row("[green]+ New:     [/green]", new_snippet_summary)
-                            console.print(diff_table)
-                        elif tool_name == "connect_remote_mcp_sse":
-                            console.print(f"   Action: Connect to remote SSE endpoint '{args.get('endpoint_url')}'")
-                        confirmation = prompt_session.prompt("Proceed with this operation? [Y/n]: ", default="y").strip().lower()
-                        if confirmation not in ["y", "yes", ""]:
-                            user_confirmed_or_not_risky = False
-                            console.print("[yellow]ℹ️ Operation cancelled by user.[/yellow]")
-                            result = "User cancelled execution of this tool call."
-                    if user_confirmed_or_not_risky:
-                        try:
-                            result = execute_function_call_dict(tool_call)
-                        except Exception as e_exec:
-                            console.print(f"[red]Unexpected error during tool execution: {str(e_exec)}[/red]")
-                            result = f"Error: Unexpected error during tool execution: {str(e_exec)}"
-                    executed_tool_call_ids_and_results.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call["id"],
-                        "content": result
-                    })
-                for tool_res in executed_tool_call_ids_and_results:
-                    conversation_history.append(tool_res) # type: ignore
-                console.print("\n[bold bright_blue]🔄 Processing results...[/bold bright_blue]")
-                follow_up_stream = completion(
-                    model=model_name,
-                    messages=conversation_history,
-                    tools=tools,
-                    max_tokens=max_tokens,
-                    api_base=api_base_url,
-                    stream=True
-                )
-                follow_up_content = ""
-                reasoning_started_printed_follow_up = False
-                reasoning_content_accumulated_follow_up = ""
-                for chunk in follow_up_stream:
-                    if hasattr(chunk.choices[0].delta, 'reasoning_content') and chunk.choices[0].delta.reasoning_content:
-                        reasoning_chunk_content_follow_up = chunk.choices[0].delta.reasoning_content
-                        reasoning_content_accumulated_follow_up += reasoning_chunk_content_follow_up
-                        if reasoning_style == "full":
-                            if not reasoning_started_printed_follow_up:
-                                console.print("\n[bold blue]💭 Reasoning:[/bold blue]")
-                                reasoning_started_printed_follow_up = True
-                            console.print(reasoning_chunk_content_follow_up, end="")
-                        elif reasoning_style == "compact":
-                            if not reasoning_started_printed_follow_up:
-                                console.print("\n[bold blue]💭 Reasoning...[/bold blue]", end="")
-                                reasoning_started_printed_follow_up = True
-                            console.print(".", end="")
-                    elif chunk.choices[0].delta.content:
-                        if reasoning_started_printed_follow_up and reasoning_style != "full":
-                            console.print()
-                            reasoning_started_printed_follow_up = False
-                        if not follow_up_content:
-                             console.print("\n\n[bold bright_blue]🤖 Assistant>[/bold bright_blue] ", end="")
-                        follow_up_content += chunk.choices[0].delta.content
-                        console.print(chunk.choices[0].delta.content, end="")
-                if reasoning_started_printed_follow_up and reasoning_style == "compact" and not follow_up_content:
-                    console.print()
-                console.print()
-                assistant_follow_up_message = {
-                    "role": "assistant",
-                    "content": follow_up_content
-                }
-                if reasoning_content_accumulated_follow_up:
-                    assistant_follow_up_message["reasoning_content_full"] = reasoning_content_accumulated_follow_up
-                conversation_history.append(assistant_follow_up_message)
-        else:
-            conversation_history.append(assistant_message)
-        return {"success": True}
-    except Exception as e:
-        error_msg = f"LLM API error: {str(e)}"
-        console.print(f"\n[bold red]❌ {error_msg}[/bold red]")
-        return {"error": error_msg}
 
 # --------------------------------------------------------------------------------
 # 7. Test & Main interactive loop
@@ -1630,10 +1111,10 @@ def main():
         if try_handle_script_command(user_input): continue
         if try_handle_ask_command(user_input): continue
         if try_handle_time_command(user_input): continue
-        if try_handle_test_command(user_input): continue
-        
-        stream_llm_response(user_input)
+        if try_handle_test_command(user_input): continue # Keep this line
 
+        # Call with all necessary arguments
+        stream_llm_response(user_input, conversation_history, console, prompt_session)
     console.print("[bold blue]✨ Session finished. Thank you for using AI Engineer![/bold blue]")
     sys.exit(0)
 
@@ -1648,7 +1129,8 @@ def execute_script_line(line: str):
     if try_handle_context_command(line): return
     if try_handle_prompt_command(line): return
     if try_handle_test_command(line): return
-    stream_llm_response(line)
+    # Call with all necessary arguments
+    stream_llm_response(line, conversation_history, console, prompt_session)
 
 def try_handle_script_command(user_input: str, is_startup_script: bool = False) -> bool:
     command_prefix = "/script"
@@ -1695,10 +1177,10 @@ def try_handle_ask_command(user_input: str) -> bool:
     if stripped_input.lower().startswith(prefix_with_space):
         text_to_ask = stripped_input[len(prefix_with_space):].strip()
     elif stripped_input.lower() == command_prefix:
-        console.print("[yellow]Usage: /ask <text>[/yellow]")
-        console.print("[yellow]  Example: /ask What is the capital of France?[/yellow]")
+        console.print("[yellow]Usage: /ask <text>[/yellow]\n[yellow]  Example: /ask What is the capital of France?[/yellow]")
         return True
-    stream_llm_response(text_to_ask)
+    # Call with all necessary arguments
+    stream_llm_response(text_to_ask, conversation_history, console, prompt_session)
     return True
 
 def try_handle_time_command(user_input: str) -> bool:
