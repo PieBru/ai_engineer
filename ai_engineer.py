@@ -47,6 +47,7 @@ import copy # For deepcopy
 import argparse # For command-line argument handling
 from textwrap import dedent # For /prompt command meta-prompts
 import httpx # For new MCP tools
+import fnmatch # For wildcard matching in test_inference
 
 # Import modules from src/
 from src.config_utils import (
@@ -1192,27 +1193,32 @@ def _test_single_model_capabilities(model_label: str, model_name_to_test: str, a
             if not api_base_for_call.lower().startswith("http://") or \
                not ("localhost" in api_base_for_call.lower() or "127.0.0.1" in api_base_for_call.lower()):
                 api_base_for_call = None
-                console.print(f"[dim]  (Note: Testing Ollama model '{model_name_to_test}' with LiteLLM's default Ollama endpoint resolution, not global '{api_base_to_test}')[/dim]")
+                pre_call_notes.append(f"[dim]  (Note: Testing Ollama model '{model_name_to_test}' with LiteLLM's default Ollama endpoint resolution, not global '{api_base_to_test}')[/dim]")
         elif provider_from_model_name in known_direct_providers_domains and \
              known_direct_providers_domains[provider_from_model_name] not in api_base_for_call.lower():
             if provider_from_model_name == "google":
                 api_base_for_call = "https://generativelanguage.googleapis.com"
-                console.print(f"[dim]  (Note: Testing '{model_name_to_test}' with explicit Google API base: '{api_base_for_call}')[/dim]")
+                pre_call_notes.append(f"[dim]  (Note: Testing '{model_name_to_test}' with explicit Google API base: '{api_base_for_call}')[/dim]")
             else:
                 # For other direct providers, let LiteLLM use its default by setting api_base to None
                 api_base_for_call = None
+                # Note removed as per user request: pre_call_notes.append(f"[dim]  (Note: Testing '{model_name_to_test}' with its provider's default API base, not global '{api_base_to_test}')[/dim]")
 
     if "gemini" in model_name_to_test.lower() or "google" in model_name_to_test.lower() : # Broaden check for Gemini
-        console.print(f"[bold yellow blink]DEBUG Gemini Test Params:[/bold yellow blink] model='{model_name_to_test}', api_base_for_call='{api_base_for_call}'")
+        pre_call_notes.append(f"[bold yellow blink]DEBUG Gemini Test Params:[/bold yellow blink] model='{model_name_to_test}', api_base_for_call='{api_base_for_call}'")
 
     # Prepare keyword arguments for litellm.completion
     completion_kwargs = {}
-    # If we are targeting Google's direct API base for Gemini, explicitly disable proxies
-    # to prevent interference from global proxy env vars (e.g., LITELLM_PROXY_API_BASE or HTTPS_PROXY).
     if model_name_to_test and "google" in model_name_to_test.split('/')[0].lower() and \
        api_base_for_call == "https://generativelanguage.googleapis.com":
-        completion_kwargs["proxies"] = None # You can also try proxies={}
-        console.print(f"[dim]  (Note: Explicitly disabling proxies for direct Google API call to '{model_name_to_test}')[/dim]")
+        completion_kwargs["proxies"] = None 
+        pre_call_notes.append(f"[dim]  (Note: Explicitly disabling proxies for direct Google API call to '{model_name_to_test}')[/dim]")
+
+    # Print all collected notes before the "Attempting..." line
+    for note in pre_call_notes:
+        console.print(note)
+
+    console.print("[yellow]  1. Attempting basic API call...[/yellow]", end="")
 
     try:
         response = completion(
@@ -1320,85 +1326,101 @@ def test_inference_endpoint(specific_model_name: str = None):
     api_base_url = get_config_value("api_base", DEFAULT_LITELLM_API_BASE)
     role_based_models_config = [
         {"label": "DEFAULT",   "name_var": LITELLM_MODEL_DEFAULT,   "expect_tools": True},
-        {"label": "ROUTING",   "name_var": LITELLM_MODEL_ROUTING,   "expect_tools": False},
+        {"label": "ROUTING",   "name_var": LITELLM_MODEL_ROUTING,   "expect_tools": False}, # Usually no tools
         {"label": "TOOLS",     "name_var": LITELLM_MODEL_TOOLS,     "expect_tools": True},
-        {"label": "CODING",    "name_var": LITELLM_MODEL_CODING,    "expect_tools": False},
-        {"label": "KNOWLEDGE", "name_var": LITELLM_MODEL_KNOWLEDGE, "expect_tools": False},
+        {"label": "CODING",    "name_var": LITELLM_MODEL_CODING,    "expect_tools": False}, # Usually no general tools
+        {"label": "KNOWLEDGE", "name_var": LITELLM_MODEL_KNOWLEDGE, "expect_tools": False}, # Usually no tools
     ]
     model_details = {}
     default_model_available = False
     all_results = []
     overall_success = True
+    
+    # First, gather all known models from MODEL_CONTEXT_WINDOWS and roles
+    all_known_models_set = set(MODEL_CONTEXT_WINDOWS.keys())
+    for config in role_based_models_config:
+        model_name_val = config["name_var"]
+        if model_name_val:
+            all_known_models_set.add(model_name_val)
 
+    models_to_test_set = set()
     if specific_model_name:
-        models_to_test_set = {specific_model_name}
-    else:
-        models_to_test_set = set(MODEL_CONTEXT_WINDOWS.keys())
-        # Add role-based models to the set for comprehensive testing
-        for config in role_based_models_config:
-            model_name_val = config["name_var"]
-            if model_name_val:
-                models_to_test_set.add(model_name_val)
+        if "*" in specific_model_name or "?" in specific_model_name: # Wildcard detected
+            console.print(f"[dim]Filtering models with wildcard: '{specific_model_name}'[/dim]")
+            for model_n in all_known_models_set:
+                if fnmatch.fnmatch(model_n, specific_model_name):
+                    models_to_test_set.add(model_n)
+            if not models_to_test_set:
+                console.print(f"[yellow]Warning: No models matched the wildcard pattern '{specific_model_name}'.[/yellow]")
+        else: # Specific model name without wildcard
+            models_to_test_set = {specific_model_name}
+            if specific_model_name not in all_known_models_set:
+                # This warning is useful if a user types a specific name not in our known lists.
+                # We'll still attempt to test it directly.
+                console.print(f"[yellow]Warning: Model '{specific_model_name}' is not in the known model lists (MODEL_CONTEXT_WINDOWS or configured roles). Testing it directly.[/yellow]")
+    else: # Test all known models
+        models_to_test_set = all_known_models_set
 
     # Populate model_details for roles, regardless of single or all test mode
-    model_details = {}
+    model_details = {} # Re-initialize here to ensure it's fresh based on models_to_test_set
     for config in role_based_models_config:
-        model_name = config["name_var"]
-        if model_name:
-            if model_name not in model_details:
-                model_details[model_name] = {"roles": [], "expect_tools": config["expect_tools"]}
-            model_details[model_name]["roles"].append(config["label"])
+        model_name_val = config["name_var"] # Use a different variable name to avoid confusion
+        if model_name_val: # Check if the model name from config is not None or empty
+            if model_name_val not in model_details:
+                model_details[model_name_val] = {"roles": [], "expect_tools": config["expect_tools"]}
+            model_details[model_name_val]["roles"].append(config["label"])
             if config["expect_tools"]: # If any role for this model expects tools, set it to true for the test
-                model_details[model_name]["expect_tools"] = True
+                model_details[model_name_val]["expect_tools"] = True
     
     if not models_to_test_set:
         console.print("[yellow]Warning: No models specified or found to test.[/yellow]")
         sys.exit(0)
 
-    for model_name in sorted(list(models_to_test_set)):
-        if not model_name:
+    for model_name_iter in sorted(list(models_to_test_set)): # Use a different loop variable
+        if not model_name_iter:
             all_results.append({
                 "label": "Invalid/Empty", "name": "Not Configured", "available": "N/A",
                 "tool_support": "N/A", "context_kb": "N/A", "inference_time_s": "N/A", "error_details": "Empty model name encountered."
             })
             continue
 
-        current_model_details = model_details.get(model_name)
-        display_label = model_name
+        current_model_details = model_details.get(model_name_iter)
+        display_label = model_name_iter
         expect_tools_for_this_model = True # Default for models only from MODEL_CONTEXT_WINDOWS
 
         if current_model_details:
-            display_label = f"{model_name} ({', '.join(current_model_details['roles'])})"
+            display_label = f"{model_name_iter} ({', '.join(current_model_details['roles'])})"
             expect_tools_for_this_model = current_model_details['expect_tools']
-        elif model_name in MODEL_CONTEXT_WINDOWS and not specific_model_name: # Only add (Context Map) if not specifically testing
-            display_label = f"{model_name} (Context Map)"
+        elif model_name_iter in MODEL_CONTEXT_WINDOWS and not specific_model_name: # Only add (Context Map) if not specifically testing
+            display_label = f"{model_name_iter} (Context Map)"
         
         api_base_for_model = api_base_url
         result = _test_single_model_capabilities(
             model_label=display_label,
-            model_name_to_test=model_name,
+            model_name_to_test=model_name_iter,
             api_base_to_test=api_base_for_model,
             expect_tools=expect_tools_for_this_model
         )
         all_results.append(result)
         if result["available"] != "Y":
             overall_success = False
-        if model_name == LITELLM_MODEL_DEFAULT and result["available"] == "Y": # Check if the default model is one of the tested and available
+        if model_name_iter == LITELLM_MODEL_DEFAULT and result["available"] == "Y": # Check if the default model is one of the tested and available
             default_model_available = True
             
     # Summarize errors if DEFAULT model is available
-    if default_model_available:
-        console.print(f"\n[dim]Default model ([cyan]{LITELLM_MODEL_DEFAULT}[/cyan]) is available. Attempting to summarize error messages for other models...[/dim]")
-        for res in all_results:
-            # Ensure error_details is a string before attempting to summarize
-            # This handles cases where it might be None or another type if a model was skipped early.
-            if not isinstance(res.get("error_details"), str):
-                res["error_details"] = str(res.get("error_details", "")) # Convert to string or empty string
+    if SHOW_TEST_INFERENCE_NOTES_ERRORS_COLUMN: # Only summarize if the column will be shown
+        if default_model_available:
+            console.print(f"\n[dim]Default model ([cyan]{LITELLM_MODEL_DEFAULT}[/cyan]) is available. Attempting to summarize error messages for other models...[/dim]")
+            for res in all_results:
+                # Ensure error_details is a string before attempting to summarize
+                # This handles cases where it might be None or another type if a model was skipped early.
+                if not isinstance(res.get("error_details"), str):
+                    res["error_details"] = str(res.get("error_details", "")) # Convert to string or empty string
 
-            # Only summarize for other models that failed and have error details
-            if res["name"] != LITELLM_MODEL_DEFAULT and res["available"] == "N" and res["error_details"]:
-                original_error = res["error_details"]
-                res["error_details"] = _summarize_error_message(original_error, LITELLM_MODEL_DEFAULT, api_base_url)
+                # Only summarize for other models that failed and have error details
+                if res["name"] != LITELLM_MODEL_DEFAULT and res["available"] == "N" and res["error_details"]:
+                    original_error = res["error_details"]
+                    res["error_details"] = _summarize_error_message(original_error, LITELLM_MODEL_DEFAULT, api_base_url)
 
 
     console.print("\n\n[bold green]📊 Inference Test Summary[/bold green]")
@@ -1409,7 +1431,6 @@ def test_inference_endpoint(specific_model_name: str = None):
     summary_table.add_column("Tool Support", justify="center")
     summary_table.add_column("Context", justify="right")
     summary_table.add_column("Time (s)", justify="right")
-    # Increase max_width for Notes/Errors. Rich will try to make it this wide if console allows.
     if SHOW_TEST_INFERENCE_NOTES_ERRORS_COLUMN:
         notes_errors_column_width = console.width // 3 if console.width > 120 else 60
         summary_table.add_column("Notes/Errors", style="dim", overflow="fold", max_width=notes_errors_column_width)
@@ -1417,27 +1438,16 @@ def test_inference_endpoint(specific_model_name: str = None):
     for res in all_results:
         available_style = "green" if res["available"] == "Y" else "red" if res["available"] == "N" else "yellow"
         tool_style = "green" if res["tool_support"] == "Y" else "red" if res["tool_support"] == "N" else "dim"
-        summary_table.add_row(
-            res["label"], 
-            res["name"],  
-            f"[{available_style}]{res['available']}[/{available_style}]",
-            f"[{tool_style}]{res['tool_support']}[/{tool_style}]",
-            res["context_kb"],
-            res["inference_time_s"],
-        )
+            
+        row_data = [res["label"], res["name"], f"[{available_style}]{res['available']}[/{available_style}]", f"[{tool_style}]{res['tool_support']}[/{tool_style}]", res["context_kb"], res["inference_time_s"]]
         if SHOW_TEST_INFERENCE_NOTES_ERRORS_COLUMN:
-            summary_table.columns[-1].style = "dim" # Ensure the style is set if column was added
-            # The previous add_row call needs to be adjusted if the column is conditional
-            # This is a bit tricky with Rich's Table.add_row. Let's adjust the row data.
-            row_data = [res["label"], res["name"], f"[{available_style}]{res['available']}[/{available_style}]", f"[{tool_style}]{res['tool_support']}[/{tool_style}]", res["context_kb"], res["inference_time_s"]]
-            if SHOW_TEST_INFERENCE_NOTES_ERRORS_COLUMN:
-                row_data.append(res["error_details"])
-            summary_table.add_row(*row_data)
+            row_data.append(res["error_details"])
+        summary_table.add_row(*row_data)
 
     # Calculate and add Totals/Summary Stats row
     total_models_tested = len([res for res in all_results if res["available"] != "N/A" and res["name"] != "Not Configured"])
     total_available_y = sum(1 for res in all_results if res["available"] == "Y")
-    total_available_n = sum(1 for res in all_results if res["available"] == "N") # Count "N"
+    total_available_n = sum(1 for res in all_results if res["available"] == "N") 
     total_tool_support_y = sum(1 for res in all_results if res["tool_support"] == "Y")
     
     # Context stats
@@ -1448,13 +1458,13 @@ def test_inference_endpoint(specific_model_name: str = None):
     overall_stats_row_data = [
         "[bold]Overall Stats[/bold]",
         f"[dim]{total_models_tested} models tested[/dim]",
-        f"[bold green]{total_available_y}Y[/bold green] / [bold red]{total_available_n}N[/bold red]", # Availability Y/N counts
-        f"[bold green]{total_tool_support_y}Y[/bold green]", # Tool Support Y count
-        f"[bold green]{total_context_known}✓[/bold green] / [bold red]{total_context_unknown_or_error}?[/bold red]", # Context Known/Unknown counts
-        "N/A", # No total for inference time
+        f"[bold green]{total_available_y}Y[/bold green] / [bold red]{total_available_n}N[/bold red]", 
+        f"[bold green]{total_tool_support_y}Y[/bold green]", 
+        f"[bold green]{total_context_known}✓[/bold green] / [bold red]{total_context_unknown_or_error}?[/bold red]", 
+        "N/A", 
     ]
     if SHOW_TEST_INFERENCE_NOTES_ERRORS_COLUMN:
-        overall_stats_row_data.append("") # Empty for Notes/Errors column
+        overall_stats_row_data.append("") 
 
     summary_table.add_row(*overall_stats_row_data)
     console.print(summary_table)
@@ -1463,8 +1473,6 @@ def test_inference_endpoint(specific_model_name: str = None):
     else:
         console.print("\n[bold red]❌ Some models failed availability checks. Please review the errors above and your .env configuration.[/bold red]")
     
-    # Exit status depends on whether any model failed, not just overall_success
-    # if any 'N' in available for the models that were actually attempted.
     if any(r['available'] == 'N' for r in all_results if r['name'] != "Not Configured"):
         sys.exit(1)
     else:
@@ -1507,8 +1515,8 @@ def main():
         metavar='MODEL_NAME',
         type=str,
         nargs='?', # Makes the argument optional
-        const='__TEST_ALL_MODELS__', # Value if flag is present without an argument
-        help='Test capabilities. If MODEL_NAME is provided, tests only that model. Otherwise, tests all known/configured models.'
+        const='__TEST_ALL_MODELS__', # Special value if flag is present without an argument
+        help='Test capabilities. If MODEL_NAME is provided (wildcards * and ? supported), tests matching models. Otherwise, tests all known/configured models.'
     )
     args = parser.parse_args()
     clear_screen()
@@ -1708,16 +1716,19 @@ def try_handle_test_command(user_input: str) -> bool:
     parts = command_body.split(maxsplit=1)
     sub_command = parts[0].lower() if parts else ""
     if sub_command == "inference":
-        test_inference_endpoint()
+        model_to_test = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
+        if model_to_test:
+            console.print(f"[dim]Testing specific model: {model_to_test}[/dim]")
+        test_inference_endpoint(specific_model_name=model_to_test) # Pass None to test all, or model_name
         return True
     elif sub_command == "all":
         console.print("[bold blue]Running all available tests...[/bold blue]")
-        test_inference_endpoint()
+        test_inference_endpoint(specific_model_name=None) # "/test all" implies testing all configured/known models
         return True
     else:
         console.print("[yellow]Usage: /test <subcommand> [arguments][/yellow]")
-        console.print("[yellow]  all         - Run all available tests (currently runs 'inference').[/yellow]")
-        console.print("[yellow]  inference   - Test models from MODEL_CONTEXT_WINDOWS and configured roles for capabilities.[/yellow]")
+        console.print("[yellow]  all         - Run all available tests (currently runs 'inference' for all known/configured models).[/yellow]")
+        console.print("[yellow]  inference [model_pattern] - Test capabilities. If model_pattern (wildcards * and ? supported) is provided, tests matching models. Otherwise, tests all known/configured models.[/yellow]")
         return True
 
 if __name__ == "__main__":
