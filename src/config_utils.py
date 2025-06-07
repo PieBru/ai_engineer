@@ -44,12 +44,91 @@ MODEL_CONFIGURATIONS: Dict[str, Dict[str, Any]] = {
     #     "context_window": 128000,
     #     "supports_tools": True,
     #     "is_thinking_model": True,
-    #     "thinking_type": "deepseek"
+    #     "thinking_type": "qwen"
     # },
 
+    "ollama_chat/devstral": {  # https://mistral.ai/news/devstral
+        "context_window": 131072,
+        "supports_tools": False,
+        "is_thinking_model": False
+    },
+    "ollama_chat/deepcoder:14b-preview-q8_0": {  # https://www.together.ai/blog/deepcoder
+        "context_window": 65536,
+        "supports_tools": True,
+        "is_thinking_model": True,
+        "thinking_type": "qwen"
+    },
+    "ollama_chat/qwen3:0.6b": {
+        "context_window": 40000,
+        "supports_tools": False,
+        "is_thinking_model": True,
+        "thinking_type": "qwen"  # Use <think> ... </think>
+    },
+    "ollama_chat/qwen3:1.7b": {
+        "context_window": 40000,
+        "supports_tools": True,
+        "is_thinking_model": True,
+        "thinking_type": "qwen"  # Use <think> ... </think>
+    },
+    "ollama_chat/qwen3:4b": {
+        "context_window": 40000,
+        "supports_tools": True,
+        "is_thinking_model": True,
+        "thinking_type": "qwen"  # Use <think> ... </think>
+    },
+    "ollama_chat/qwen3:8b": {
+        "context_window": 40000,
+        "supports_tools": True,
+        "is_thinking_model": True,
+        "thinking_type": "qwen"  # Use <think> ... </think>
+    },
+    "ollama_chat/qwen3:14b": {
+        "context_window": 40000,
+        "supports_tools": True,
+        "is_thinking_model": True,
+        "thinking_type": "qwen"  # Use <think> ... </think>
+    },
+    "ollama_chat/qwen3:30b": {
+        "context_window": 40000,
+        "supports_tools": False,
+        "is_thinking_model": True,
+        "thinking_type": "qwen"  # Use <think> ... </think>
+    },
+    "ollama_chat/qwen3:32b": {
+        "context_window": 40000,
+        "supports_tools": True,
+        "is_thinking_model": True,
+        "thinking_type": "qwen"  # Use <think> ... </think>
+    },
+    "ollama_chat/gemma3:1b-it-qat": {
+        "context_window": 128000,
+        "supports_tools": False,
+        "is_thinking_model": False
+    },
+    "ollama_chat/gemma3:4b-it-qat": {
+        "context_window": 128000,
+        "supports_tools": False,
+        "is_thinking_model": False
+    },
+    "ollama_chat/gemma3:12b-it-qat": {
+        "context_window": 128000,
+        "supports_tools": False,
+        "is_thinking_model": False
+    },
+    "ollama_chat/gemma3:27b-it-qat": {
+        "context_window": 128000,
+        "supports_tools": False,
+        "is_thinking_model": False
+    },
+    "ollama_chat/qwq": {
+        "context_window": 131072,
+        "supports_tools": True,
+        "is_thinking_model": True,
+        "thinking_type": "qwen"
+    },
     "deepseek/deepseek-chat": {
         "context_window": 128000,
-        "supports_tools": True, # DeepSeek models generally support tools
+        "supports_tools": True,
         "is_thinking_model": False,
     },
     "deepseek/deepseek-reasoner": {
@@ -61,30 +140,6 @@ MODEL_CONFIGURATIONS: Dict[str, Dict[str, Any]] = {
         "context_window": 128000,
         "supports_tools": True,
         "is_thinking_model": False,
-    },
-    
-    "ollama_chat/qwen3:1.7b": { # Used as DEFAULT_LITELLM_MODEL_ROUTING
-        "context_window": 32768, # Qwen models often have large context
-        "supports_tools": True, # Smaller models might not always be tuned for tools
-        "is_thinking_model": True, # Qwen models often use <think> or similar
-        "thinking_type": "qwen"  # Use <think> ... </think>
-    },
-    "ollama_chat/gemma3:27b-it-qat": { # Used as DEFAULT_LITELLM_MODEL_KNOWLEDGE
-        "context_window": 128000,
-        "supports_tools": False,
-        "is_thinking_model": False
-    },
-    "ollama_chat/qwq:latest": {
-        "context_window": 131072,
-        "supports_tools": True,
-        "is_thinking_model": True,
-        "thinking_type": "qwen"
-    },
-    "ollama_chat/deepcoder:14b-preview-q8_0": {
-        "context_window": 16384,
-        "supports_tools": True,
-        "is_thinking_model": True,
-        "thinking_type": "qwen"
     },
 
     # Add other models here with their specific configurations

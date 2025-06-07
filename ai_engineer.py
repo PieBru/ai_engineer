@@ -1141,8 +1141,8 @@ def _test_single_model_capabilities(model_label: str, model_name_to_test: str, a
     model_expectations = get_model_test_expectations(model_name_to_test)
     expected_tool_support = model_expectations.get("supports_tools", role_expect_tools) # Prioritize model-specific, fallback to role
     expected_thinking_model = model_expectations.get("is_thinking_model", False)
-    # thinking_type = model_expectations.get("thinking_type") # For future use
-    context_window_kb_str = f"{model_expectations.get('context_window', 0) // 1000}k"
+    # thinking_type = model_expectations.get("thinking_type") # For future use # Corrected divisor for KB
+    context_window_kb_str = f"{model_expectations.get('context_window', 0) // 1024}k"
 
 
     results: Dict[str, Any] = {
@@ -1206,10 +1206,10 @@ def _test_single_model_capabilities(model_label: str, model_name_to_test: str, a
     for note in pre_call_notes:
         console.print(note)
     
-    console.print("[yellow]  1. Attempting basic API call...[/yellow]", end="")
+    console.print("[white]  1. Attempting basic API call...[/white]", end="")
     
     # --- Basic API Call & Thinking Test ---
-    observed_thinking_final = False
+    observed_thinking_final = False # Initialize before loop
     api_call_error_message = None
     for attempt in range(2): # Max 2 attempts for basic call / thinking
         try:
@@ -1262,15 +1262,15 @@ def _test_single_model_capabilities(model_label: str, model_name_to_test: str, a
 
 
     # --- Token Counting & Context (uses pre-defined expectation) ---
-    console.print("[yellow]  2. Testing token counting & context...[/yellow]", end="")
+    console.print("[white]  2. Testing token counting & context...[/white]", end="")
     if results["context_kb"] != "N/A": # If context was defined
         console.print(f"[green] ✓ OK[/green] (Context: {results['context_kb']})")
     else:
         console.print(f"[yellow] ⚠️ Not Defined[/yellow]")
 
 
-    # --- Tool Calling Capability Test ---
-    console.print("[yellow]  3. Testing tool calling capability...[/yellow]", end="")
+    # --- Tool Calling Capability Test --- # Changed to white
+    console.print("[white]  3. Testing tool calling capability...[/white]", end="")
     if expected_tool_support:
         observed_tool_support_final = "N" # Default to N if all attempts fail
         tool_call_error_message = None
@@ -1321,8 +1321,8 @@ def _test_single_model_capabilities(model_label: str, model_name_to_test: str, a
             console.print(f"[dim]  {mismatch_note}[/dim]")
             
     else: # Not expected to support tools
-        console.print(" [dim]N/A (Not Expected)[/dim]")
-        results["tool_support"] = "N/A"
+        console.print(" [dim]No (As Expected)[/dim]") # Indicate 'No' tool support, as expected
+        results["tool_support"] = "N" # Set to 'N' for consistency in table (will show as red 'N')
 
     if results["available"] == "N" and results["inference_time_s"] == "N/A": # Ensure time is recorded if initial call failed
          results["inference_time_s"] = f"{time.time() - start_time:.2f}"
@@ -1480,7 +1480,7 @@ def test_inference_endpoint(specific_model_name: str = None):
         f"[bold green]{total_tool_support_y}Y[/bold green]",
         f"[bold green]{total_thinking_y}Y[/bold green]",
         f"[bold green]{total_context_known}✓[/bold green] / [bold red]{total_context_unknown_or_error}?[/bold red]", 
-        "N/A", 
+        "", # Changed from "N/A" to empty string for Time (s) in overall stats
     ]
     if SHOW_TEST_INFERENCE_NOTES_ERRORS_COLUMN:
         overall_stats_row_data.append("") 
