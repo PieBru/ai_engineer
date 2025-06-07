@@ -1,7 +1,7 @@
 # /run/media/piero/NVMe-4TB/Piero/AI/AI-Engineer/config_utils.py
 import os
 from pathlib import Path
-from typing import Dict, Any, Union, Tuple
+from typing import Dict, Any, Union, Tuple, Optional
 from dotenv import load_dotenv
 
 # Default LiteLLM configuration values - LITELLM_MODEL serves as LITELLM_MODEL_DEFAULT
@@ -10,10 +10,10 @@ DEFAULT_LITELLM_API_BASE = "https://api.deepseek.com/v1"
 DEFAULT_LITELLM_MAX_TOKENS = 8192  # For models which context window size is unknown
 
 # Defaults for specialized models. Users should override these via .env for optimal use.
-DEFAULT_LITELLM_MODEL_ROUTING = "deepseek/deepseek-chat" # Often a smaller, faster model
-DEFAULT_LITELLM_MODEL_TOOLS = DEFAULT_LITELLM_MODEL # By default, tools model is same as default
-DEFAULT_LITELLM_MODEL_CODING = "deepseek/deepseek-coder" # Specialized coding model
-DEFAULT_LITELLM_MODEL_KNOWLEDGE = DEFAULT_LITELLM_MODEL # For general knowledge, summarization
+DEFAULT_LITELLM_MODEL_ROUTING = "ollama_chat/gemma3:4b-it-qat" # Often a smaller, faster model
+DEFAULT_LITELLM_MODEL_TOOLS = "deepseek/deepseek-chat" # By default, tools model is same as default
+DEFAULT_LITELLM_MODEL_CODING = "deepseek/deepseek-coder" # Specialized coding model, also "deepseek/deepseek-reasoner" (SOTA 2025, slower, more expensive)
+DEFAULT_LITELLM_MODEL_KNOWLEDGE = "ollama_chat/gemma3:27b-it-qat" # For general knowledge, summarization
 
 # Default UI and Reasoning configuration values
 DEFAULT_REASONING_EFFORT = "medium"  # Possible values: "low", "medium", "high"
@@ -29,100 +29,75 @@ SHOW_TEST_INFERENCE_NOTES_ERRORS_COLUMN = False # Set to False to hide the "Note
 MAX_FILES_TO_PROCESS_IN_DIR = 1000
 MAX_FILE_SIZE_BYTES = 5_000_000  # 5MB
 
-DEFAULT_CONTEXT_WINDOW = 16384  # Fallback if a model is not in the map
+DEFAULT_MODEL_TEST_EXPECTATIONS: Dict[str, Any] = {
+    "context_window": 16384,  # Fallback if a model is not in the map
+    "supports_tools": False,  # Default expectation for tool support
+    "is_thinking_model": False, # Default expectation for <think> prefix
+    "thinking_type": None     # E.g., "qwen3", "deepseek", "mistral"
+}
 
-# Context window sizes for various models (in tokens)
+# Model-specific configurations including context window and test expectations
 # LiteLLM documentation here: https://docs.litellm.ai/docs/providers
-MODEL_CONTEXT_WINDOWS: Dict[str, int] = {
+MODEL_CONFIGURATIONS: Dict[str, Dict[str, Any]] = {
+    # Example structure:
+    # "model_name": {
+    #     "context_window": 128000,
+    #     "supports_tools": True,
+    #     "is_thinking_model": True,
+    #     "thinking_type": "deepseek"
+    # },
 
-    # via OpenRouter
-    "openrouter/deepseek/deepseek-coder": 128000,
-    "openrouter/deepseek/deepseek-chat": 128000,
-    "openrouter/mistralai/mistral-small-latest": 32000, # FIXME unknown
-    "openrouter/mistralai/devstral-small:free": 32000, # FIXME unknown
-    "openrouter/meta-llama/llama-4-scout:free": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "openrouter/meta-llama/llama-4-maverick:free": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "openrouter/meta-llama/llama-3-8b-instruct": 8192, # Llama 3 8B is 8k
-    "openrouter/meta-llama/llama-3-70b-instruct": 8192, # Llama 3 70B is 8k
-    "openrouter/qwen/qwen-2-72b-instruct": 32768, # Qwen2 72B
-    "openrouter/microsoft/phi-3-medium-128k-instruct": 128000, # Phi-3 Medium 128k
-    "openrouter/qwen/qwen-2-7b-instruct": 32768, # Qwen2 7B
-    "openrouter/databricks/dbrx-instruct": 32768, # DBRX Instruct
-    "openrouter/agentica-org/deepcoder-14b-preview:free": 16384, # Educated guess for a 14B coder model
-    "openrouter/open-r1/olympiccoder-32b:free": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "openrouter/qwen/qwq-32b:free": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "openrouter/deepseek/deepseek-r1-distill-qwen-32b:free": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "openrouter/qwen/qwen-2.5-coder-32b-instruct:free": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-
-    "ollama_chat/devstral:latest": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/codestral:22b-v0.1-q5_K_S": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/qwen2.5-coder:14b-instruct-q6_K": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/deepcoder:14b-preview-q8_0": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/gemma3:27b-it-qat": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/hf.co/bartowski/google_gemma-3-27b-it-qat-GGUF:Q6_K": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/hf.co/bartowski/mistralai_Mistral-Small-3.1-24B-Instruct-2503-GGUF:Q5_K_M": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/hf.co/unsloth/DeepSeek-R1-0528-Qwen3-8B-GGUF:Q6_K": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/hf.co/unsloth/phi-4-GGUF:Q6_K": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/jacob-ebey/phi4-tools:latest": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/llama3.1:8b-instruct-q8_0": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/llama3.2:3b-instruct-q8_0": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/llama3.3:70b-instruct-q3_K_S": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/mannix/llama-3.3:iq2_xxs": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/mistral-small3.1:latest": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/phi4:14b-q8_0": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/phi4-mini:3.8b-q8_0": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/phi4-reasoning:latest": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/qwen2.5:14b-instruct-q6_K": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/qwen2.5:0.5b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/qwen2.5:1.5b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/qwen2.5:3b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/qwen2.5:7b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/qwen2.5:14b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    #"ollama_chat/qwen2.5:32b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/qwen2.5:72b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/qwen3:0.6b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/qwen3:1.7b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/qwen3:4b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/qwen3:8b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/qwen3:14b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    #"ollama_chat/qwen3:30b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    #"ollama_chat/qwen3:32b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/qwq:latest": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/THUDM_GLM-4-32B-0414-Q5_K_M.gguf:latest": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-
-    # via DeepSeek native API
-    "deepseek/deepseek-chat": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "deepseek/deepseek-reasoner": 128000,
-    "deepseek/deepseek-coder": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-
-    #"openai/gpt-4o": 128000,
-    #"openai/gpt-4-turbo": 128000, # Covers various gpt-4-turbo versions
-    #"openai/gpt-4-vision-preview": 128000,
-    #"openai/gpt-4": 8192,
-    #"openai/gpt-4-32k": 32768,
-    #"openai/gpt-3.5-turbo": 16385, # Covers various gpt-3.5-turbo versions
-
-    #"anthropic/claude-3-opus-20240229": 200000,
-    #"anthropic/claude-3-sonnet-20240229": 200000,
-    #"anthropic/claude-3-haiku-20240307": 200000,
-    #"anthropic/claude-2.1": 200000,
-    #"anthropic/claude-2": 100000,
-    #"anthropic/claude-instant-1.2": 100000,
-
-    "cerebras/llama-3.3-70b": 32768,
-    "cerebras/llama3.1-8b": 32768,
-    "cerebras/llama-4-scout-17b-16e-instruct": 32768,
-    "cerebras/qwen-3-32b": 32768,
-
+    "deepseek/deepseek-chat": {
+        "context_window": 128000,
+        "supports_tools": True, # DeepSeek models generally support tools
+        "is_thinking_model": False,
+    },
+    "deepseek/deepseek-reasoner": {
+        "context_window": 128000,
+        "supports_tools": True,
+        "is_thinking_model": False, # Reasons internally, does not show <think>
+    },
+    "deepseek/deepseek-coder": {
+        "context_window": 128000,
+        "supports_tools": True,
+        "is_thinking_model": False,
+    },
     
-    #"gemini/gemini-1.5-pro-latest": 1048576,
-    #"gemini/gemini-1.0-pro": 30720,
-    #"gemini/gemini-pro": 30720,
-    # FIXME Tentative values for newer Gemini models - update when official specs are confirmed
-    #"gemini/gemini-2.0-flash": 128000,  # Assuming a large context for a Flash model
-    #"gemini/gemini-2.0-pro": 256000,    # Assuming a very large context for a Pro model
-    #"gemini/gemini-2.5-flash": 128000,  # Assuming similar to 2.0 Flash or potentially larger
-    #"gemini/gemini-2.5-pro": 1048576,   # Assuming it matches or aims for Gemini 1.5 Pro's scale
+    "ollama_chat/qwen3:1.7b": { # Used as DEFAULT_LITELLM_MODEL_ROUTING
+        "context_window": 32768, # Qwen models often have large context
+        "supports_tools": True, # Smaller models might not always be tuned for tools
+        "is_thinking_model": True, # Qwen models often use <think> or similar
+        "thinking_type": "qwen"  # Use <think> ... </think>
+    },
+    "ollama_chat/gemma3:27b-it-qat": { # Used as DEFAULT_LITELLM_MODEL_KNOWLEDGE
+        "context_window": 128000,
+        "supports_tools": False,
+        "is_thinking_model": False
+    },
+    "ollama_chat/qwq:latest": {
+        "context_window": 131072,
+        "supports_tools": True,
+        "is_thinking_model": True,
+        "thinking_type": "qwen"
+    },
+    "ollama_chat/deepcoder:14b-preview-q8_0": {
+        "context_window": 16384,
+        "supports_tools": True,
+        "is_thinking_model": True,
+        "thinking_type": "qwen"
+    },
+
+    # Add other models here with their specific configurations
+    # OpenRouter Examples (FIXME: Update with actuals and expectations)
+    # "openrouter/deepseek/deepseek-coder": {"context_window": 128000, "supports_tools": True, "is_thinking_model": True, "thinking_type": "deepseek"},
+    # "openrouter/meta-llama/llama-3-8b-instruct": {"context_window": 8192, "supports_tools": True},
+
+    # Cerebras Examples (FIXME: Update with actuals and expectations)
+    # "cerebras/llama-3.3-70b": {"context_window": 32768, "supports_tools": True},
+    # "cerebras/llama-4-scout-17b-16e-instruct": {"context_window": 32768, "supports_tools": True},
+
+    # Gemini Examples (FIXME: Update with actuals and expectations)
+    # "gemini/gemini-1.5-pro-latest": {"context_window": 1048576, "supports_tools": True},
 }
 
 SUPPORTED_SET_PARAMS = {
@@ -144,26 +119,20 @@ SUPPORTED_SET_PARAMS = {
     },
     "model_knowledge": {
         "env_var": "LITELLM_MODEL_KNOWLEDGE",
-        "description": "The language model to use (e.g., 'gpt-4o', 'deepseek-reasoner')."
+        "description": "The language model to use (e.g., 'gpt-4o', 'deepseek-reasoner')." # This description seems duplicated
     },
     "api_base": {
         "env_var": "LITELLM_API_BASE",
         "description": "The primary API base URL. Assumed to be used by all models unless a model-specific API base is configured (not yet supported)."
     },
-    # We might need model-specific API bases later, e.g., LITELLM_API_BASE_CODING.
-    # For now, all models use LITELLM_API_BASE.
     "max_tokens": {
         "env_var": "LITELLM_MAX_TOKENS",
-        "description": "The API base URL for the LLM provider."
+        "description": "Maximum number of tokens for the LLM response (e.g., 4096)." # Corrected description
     },
     "reasoning_style": {
         "env_var": "REASONING_STYLE",
         "allowed_values": ["full", "compact", "silent"],
         "description": "Controls the display of AI's reasoning process: 'full' (stream all reasoning), 'compact' (show progress indicator), or 'silent' (no reasoning output during generation)."
-    },
-    "reasoning_effort": {
-        "env_var": "REASONING_EFFORT",
-        "description": "Maximum number of tokens for the LLM response (e.g., 4096)."
     },
     "reasoning_effort": {
         "env_var": "REASONING_EFFORT",
@@ -180,9 +149,6 @@ SUPPORTED_SET_PARAMS = {
         "description": "Controls the randomness/creativity of the response (0.0 to 2.0, lower is more deterministic)."
     },
     "system_prompt": {
-        # This is a special parameter. The /set command expects a file path.
-        # The content of the file is then read and stored in RUNTIME_OVERRIDES.
-        # It doesn't use env_var for file path input in the same way as other params.
         "description": "Path to a file whose content will replace the current system prompt."
     }
 }
@@ -190,54 +156,63 @@ SUPPORTED_SET_PARAMS = {
 def load_configuration(console_obj):
     """
     Loads .env file into environment variables.
-    Configuration precedence is handled by get_config_value:
-    1. Environment variables (highest)
-    2. .env file (loaded into environment variables)
-    4. Hardcoded defaults (lowest)
     """
-    # Load .env file into environment variables
     load_dotenv()
+
+def get_model_test_expectations(model_name: str) -> Dict[str, Any]:
+    """
+    Retrieves the full configuration dictionary for a given model name for testing purposes.
+    It tries to find an exact match or a prefix match in MODEL_CONFIGURATIONS.
+    Returns a dictionary with all expected fields, using defaults if not found.
+    """
+    if not model_name:
+        return DEFAULT_MODEL_TEST_EXPECTATIONS.copy()
+
+    # Exact match
+    if model_name in MODEL_CONFIGURATIONS:
+        # Merge with defaults to ensure all keys are present
+        config = DEFAULT_MODEL_TEST_EXPECTATIONS.copy()
+        config.update(MODEL_CONFIGURATIONS[model_name])
+        return config
+
+    # Prefix match (e.g., "gpt-4o-mini" should match "gpt-4o")
+    # Sort keys by length descending to match more specific prefixes first
+    sorted_model_keys = sorted(MODEL_CONFIGURATIONS.keys(), key=len, reverse=True)
+    for prefix in sorted_model_keys:
+        if model_name.startswith(prefix):
+            config = DEFAULT_MODEL_TEST_EXPECTATIONS.copy()
+            config.update(MODEL_CONFIGURATIONS[prefix])
+            # If the original model name had a more specific context window in the old map,
+            # we might want to preserve that. For now, prefix match takes all from matched entry.
+            return config
+            
+    return DEFAULT_MODEL_TEST_EXPECTATIONS.copy()
+
 
 def get_model_context_window(model_name: str, return_match_status: bool = False) -> Union[int, Tuple[int, bool]]:
     """
     Retrieves the context window size for a given model name.
-    It tries to find an exact match or a prefix match in MODEL_CONTEXT_WINDOWS.
     If return_match_status is True, returns a tuple (window_size, used_default_due_to_no_match).
-    'used_default_due_to_no_match' is True if DEFAULT_CONTEXT_WINDOW was returned because
-    the model_name did not match any specific entry or prefix.
+    'used_default_due_to_no_match' is True if the default context window was returned because
+    the model_name did not match any specific entry.
     """
-    used_default_due_to_no_match = False
-
-    if not model_name:
-        used_default_due_to_no_match = True
-        if return_match_status:
-            return DEFAULT_CONTEXT_WINDOW, used_default_due_to_no_match
-        return DEFAULT_CONTEXT_WINDOW
-
-    # Exact match
-    if model_name in MODEL_CONTEXT_WINDOWS:
-        window = MODEL_CONTEXT_WINDOWS[model_name]
-        # matched_specific_entry is True, so used_default_due_to_no_match remains False
-        if return_match_status:
-            return window, used_default_due_to_no_match
-        return window
-
-    # Prefix match (e.g., "gpt-4o-mini" should match "gpt-4o")
-    # Sort keys by length descending to match more specific prefixes first
-    sorted_model_keys = sorted(MODEL_CONTEXT_WINDOWS.keys(), key=len, reverse=True)
-    for prefix in sorted_model_keys:
-        if model_name.startswith(prefix):
-            window = MODEL_CONTEXT_WINDOWS[prefix]
-            # matched_specific_entry is True (via prefix), so used_default_due_to_no_match remains False
-            if return_match_status:
-                return window, used_default_due_to_no_match
-            return window
-            
-    # If we reach here, no specific match (exact or prefix) was found.
-    used_default_due_to_no_match = True
+    expectations = get_model_test_expectations(model_name)
+    context_window = expectations.get("context_window", DEFAULT_MODEL_TEST_EXPECTATIONS["context_window"])
+    
+    used_default_val = True # Assume default unless a specific entry was found
+    if model_name and model_name in MODEL_CONFIGURATIONS:
+        used_default_val = False
+    else: # Check prefix match
+        sorted_model_keys = sorted(MODEL_CONFIGURATIONS.keys(), key=len, reverse=True)
+        for prefix in sorted_model_keys:
+            if model_name and model_name.startswith(prefix):
+                used_default_val = False
+                break
+    
     if return_match_status:
-        return DEFAULT_CONTEXT_WINDOW, used_default_due_to_no_match
-    return DEFAULT_CONTEXT_WINDOW
+        return context_window, used_default_val
+    return context_window
+
 
 def get_config_value(param_name: str, default_value: Any, console_obj=None) -> Any:
     """
@@ -246,26 +221,47 @@ def get_config_value(param_name: str, default_value: Any, console_obj=None) -> A
     2. Environment variables
     4. Provided default value
     """
+    # Ensure param_name is valid before proceeding
+    if param_name not in SUPPORTED_SET_PARAMS:
+        # This case should ideally not be reached if callers use valid param_names
+        if console_obj:
+            console_obj.print(f"[yellow]Warning: Attempted to get unknown config param '{param_name}'. Using default.[/yellow]")
+        return default_value
+        
     p_config = SUPPORTED_SET_PARAMS[param_name]
     runtime_val = RUNTIME_OVERRIDES.get(param_name)
     if runtime_val is not None:
         if param_name == "max_tokens": return int(runtime_val) if isinstance(runtime_val, str) and runtime_val.isdigit() else runtime_val
-        if param_name == "temperature": return float(runtime_val) if isinstance(runtime_val, str) else runtime_val
+        if param_name == "temperature": return float(runtime_val) if isinstance(runtime_val, (str, int, float)) else runtime_val # Allow int for temp
         return runtime_val
     
-    env_val = os.getenv(p_config["env_var"])
+    env_var_name = p_config.get("env_var")
+    env_val = None
+    if env_var_name:
+        env_val = os.getenv(env_var_name)
+
     if env_val is not None:
-        # Convert env var string to appropriate type if necessary
         if param_name == "max_tokens": return int(env_val) if env_val.isdigit() else default_value
         if param_name == "temperature":
             try: return float(env_val)
             except ValueError: return default_value
-        # For reasoning_style, reasoning_effort, reply_effort, env_val is fine as string if it matches allowed_values
         if "allowed_values" in p_config and env_val.lower() in p_config["allowed_values"]:
             return env_val.lower()
-        elif "allowed_values" not in p_config: # For model, api_base
+        elif "allowed_values" not in p_config: 
              return env_val
-        # If env_val is set but not allowed for style/effort, it will fall through to TOML/default
-        # This could be logged as a warning if desired.
     
     return default_value
+
+# For backward compatibility with MODEL_CONTEXT_WINDOWS direct access if any part of the code still uses it.
+# However, new logic should prefer get_model_test_expectations or get_model_context_window.
+MODEL_CONTEXT_WINDOWS: Dict[str, int] = {
+    k: v.get("context_window", DEFAULT_MODEL_TEST_EXPECTATIONS["context_window"]) 
+    for k, v in MODEL_CONFIGURATIONS.items()
+}
+MODEL_CONTEXT_WINDOWS.update({ # Add defaults for role-based models if not explicitly in MODEL_CONFIGURATIONS
+    DEFAULT_LITELLM_MODEL_ROUTING: get_model_test_expectations(DEFAULT_LITELLM_MODEL_ROUTING)["context_window"],
+    DEFAULT_LITELLM_MODEL_TOOLS: get_model_test_expectations(DEFAULT_LITELLM_MODEL_TOOLS)["context_window"],
+    DEFAULT_LITELLM_MODEL_CODING: get_model_test_expectations(DEFAULT_LITELLM_MODEL_CODING)["context_window"],
+    DEFAULT_LITELLM_MODEL_KNOWLEDGE: get_model_test_expectations(DEFAULT_LITELLM_MODEL_KNOWLEDGE)["context_window"],
+})
+

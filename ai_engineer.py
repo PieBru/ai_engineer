@@ -52,48 +52,40 @@ import fnmatch # For wildcard matching in test_inference
 # Import modules from src/
 from src.config_utils import (
     load_configuration as load_app_configuration, get_config_value,
-    SUPPORTED_SET_PARAMS, MAX_FILES_TO_PROCESS_IN_DIR, MAX_FILE_SIZE_BYTES, MODEL_CONTEXT_WINDOWS, SHOW_TEST_INFERENCE_NOTES_ERRORS_COLUMN,
+    SUPPORTED_SET_PARAMS, MAX_FILES_TO_PROCESS_IN_DIR, MAX_FILE_SIZE_BYTES, 
+    MODEL_CONFIGURATIONS, SHOW_TEST_INFERENCE_NOTES_ERRORS_COLUMN, # Use MODEL_CONFIGURATIONS
     RUNTIME_OVERRIDES,
-    get_model_context_window # Import the helper function
+    get_model_test_expectations, # Use new helper
+    get_model_context_window # Keep for general use, test uses expectations
 )
 from src.file_utils import (
-    normalize_path, is_binary_file, read_local_file as util_read_local_file, # Renamed read_local_file to util_read_local_file
-    create_file as util_create_file, apply_diff_edit as util_apply_diff_edit # Import file utility functions
+    normalize_path, is_binary_file, read_local_file as util_read_local_file,
+    create_file as util_create_file, apply_diff_edit as util_apply_diff_edit
 )
 from src.tool_defs import tools, RISKY_TOOLS
-from src.prompts import system_PROMPT
-from prompt_toolkit.styles import Style as PromptStyle # Keep PromptStyle import
-# Import litellm
-from litellm import completion, token_counter # Added token_counter
-import litellm # Import the base module to set options
-import logging # For configuring logger levels
-from typing import Dict # For type hinting
+from src.prompts import system_PROMPT, RichMarkdown # Moved RichMarkdown import here
+from prompt_toolkit.styles import Style as PromptStyle
+from litellm import completion, token_counter
+import litellm 
+import logging # type: ignore
+from typing import Dict, Any, Optional
 
-# Define the application version
-__version__ = "0.2.0" # Example version
+__version__ = "0.2.1" # Updated version
 
-# Initialize Rich console and prompt session
 console = Console()
 prompt_session = PromptSession(
     style=PromptStyle.from_dict({
-        'prompt': '#0066ff bold',  # Bright blue prompt
+        'prompt': '#0066ff bold',
         'completion-menu.completion': 'bg:#1e3a8a fg:#ffffff',
         'completion-menu.completion.current': 'bg:#3b82f6 fg:#ffffff bold',
     })
 )
 
-# Global state for timestamp display
 SHOW_TIMESTAMP_IN_PROMPT = False
-
-# Load configurations at startup using the imported function
 load_app_configuration(console)
 
-# --- Suppress LiteLLM informational messages ---
-# Suppress the "Give Feedback / Get Help" banner
 litellm.suppress_debug_info = True
-# Suppress "LiteLLM.Info" messages by setting logger level to WARNING
 logging.getLogger("litellm").setLevel(logging.WARNING)
-# --- End LiteLLM message suppression ---
 
 class FileToCreate(BaseModel):
     path: str
@@ -106,10 +98,8 @@ class FileToEdit(BaseModel):
     new_snippet: str
     model_config = ConfigDict(extra='ignore', frozen=True)
 
-# --------------------------------------------------------------------------------
-# 4. Helper functions
-# --------------------------------------------------------------------------------
-
+# ... (Keep _handle_local_mcp_stream, _handle_remote_mcp_sse, and all try_handle_* command functions as they are) ...
+# ... (No changes to these helper functions from the previous full file content)
 def _handle_local_mcp_stream(endpoint_url: str, timeout_seconds: int, max_data_chars: int) -> str:
     """
     Connects to a local MCP server endpoint that provides a streaming response.
@@ -1108,7 +1098,6 @@ def _summarize_error_message(error_message: str, summary_model_name: str, api_ba
     if not error_message:
         return ""
     
-    # Limit the error message length to avoid excessive token usage for summarization
     max_error_len_for_summary = 1000
     truncated_error_message = error_message[:max_error_len_for_summary]
     if len(error_message) > max_error_len_for_summary:
@@ -1121,28 +1110,52 @@ def _summarize_error_message(error_message: str, summary_model_name: str, api_ba
             model=summary_model_name,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
-            max_tokens=50, # Allow short summary
+            max_tokens=50,
             api_base=api_base,
             stream=False
         )
         summary = response.choices[0].message.content.strip()
-        return f"Summary: {summary}" if summary else error_message # Fallback to original if summary is empty
-    except Exception as e:
-        # If summarization fails, return the original (potentially truncated) error
-        # console.print(f"[dim]Error summarizing error message: {e}[/dim]")
-        return truncated_error_message # Or just error_message if you prefer full original on summary failure
+        return f"Summary: {summary}" if summary else error_message
+    except Exception:
+        return truncated_error_message
 
-def _test_single_model_capabilities(model_label: str, model_name_to_test: str, api_base_to_test: str, expect_tools: bool) -> Dict:
+def _perform_api_call_for_test(model_name_to_test: str, messages: list, api_base_for_call: Optional[str], temperature: float, max_tokens_val: int, timeout_val: int, completion_kwargs: dict, tools_list: Optional[list] = None) -> Any:
+    """Helper to make a single API call and handle exceptions."""
+    call_args = {
+        "model": model_name_to_test,
+        "messages": messages,
+        "api_base": api_base_for_call,
+        "temperature": temperature,
+        "max_tokens": max_tokens_val,
+        "timeout": timeout_val,
+        **completion_kwargs
+    }
+    if tools_list:
+        call_args["tools"] = tools_list
+    return completion(**call_args)
+
+
+def _test_single_model_capabilities(model_label: str, model_name_to_test: str, api_base_to_test: str, role_expect_tools: bool) -> Dict[str, Any]:
     """Helper function to test capabilities of a single model."""
-    results = {
+    
+    model_expectations = get_model_test_expectations(model_name_to_test)
+    expected_tool_support = model_expectations.get("supports_tools", role_expect_tools) # Prioritize model-specific, fallback to role
+    expected_thinking_model = model_expectations.get("is_thinking_model", False)
+    # thinking_type = model_expectations.get("thinking_type") # For future use
+    context_window_kb_str = f"{model_expectations.get('context_window', 0) // 1000}k"
+
+
+    results: Dict[str, Any] = {
         "label": model_label,
         "name": model_name_to_test,
         "available": "N",
         "tool_support": "N/A",
-        "context_kb": "N/A",
+        "is_thinking_model": "N",
+        "context_kb": context_window_kb_str if model_expectations.get('context_window', 0) > 0 else "N/A",
         "inference_time_s": "N/A",
         "error_details": ""
     }
+
     if not model_name_to_test:
         results["error_details"] = "Model name not configured."
         results["available"] = "Skipped"
@@ -1151,168 +1164,170 @@ def _test_single_model_capabilities(model_label: str, model_name_to_test: str, a
     console.print(f"\n[bold blue]🧪 Testing Model: [cyan]{model_label} ({model_name_to_test})[/cyan]...[/bold blue]")
     temperature_for_test = 0.1
     start_time = time.time()
-
     test_messages = [{"role": "user", "content": "Test: Respond with 'ok'."}]
-    api_key_name_hint = "API key"
+    api_key_name_hint = "API key" # Default hint
+
     if api_base_to_test:
-        if "openai" in api_base_to_test.lower() or "gpt-" in model_name_to_test.lower():
-            api_key_name_hint = "OPENAI_API_KEY"
-        elif "deepseek" in api_base_to_test.lower() or "deepseek" in model_name_to_test.lower():
-            api_key_name_hint = "DEEPSEEK_API_KEY"
-        elif "anthropic" in api_base_to_test.lower() or "claude" in model_name_to_test.lower():
-            api_key_name_hint = "ANTHROPIC_API_KEY"
-        elif "openrouter" in api_base_to_test.lower():
-            api_key_name_hint = "OPENROUTER_API_KEY"
+        if "openai" in api_base_to_test.lower() or "gpt-" in model_name_to_test.lower(): api_key_name_hint = "OPENAI_API_KEY"
+        elif "deepseek" in api_base_to_test.lower() or "deepseek" in model_name_to_test.lower(): api_key_name_hint = "DEEPSEEK_API_KEY"
+        elif "anthropic" in api_base_to_test.lower() or "claude" in model_name_to_test.lower(): api_key_name_hint = "ANTHROPIC_API_KEY"
+        elif "openrouter" in api_base_to_test.lower(): api_key_name_hint = "OPENROUTER_API_KEY"
 
-    api_base_for_call = api_base_to_test # Start with the global/passed base
-    pre_call_notes = [] # List to store notes to print before the "Attempting..." line
+    api_base_for_call = api_base_to_test
+    pre_call_notes = []
+    completion_kwargs: Dict[str, Any] = {} # For proxies, etc.
 
-    # Heuristic to decide if we should override the global api_base for this specific model test.
-    # This allows testing direct provider models when the global LITELLM_API_BASE is set
-    # to a different provider or an aggregator that might not proxy this specific model correctly.
-    if model_name_to_test and api_base_for_call: # Only adjust if a global base is actually set
+    if model_name_to_test and api_base_for_call:
         provider_from_model_name = model_name_to_test.split('/')[0].lower()
-        
-        is_ollama_model = provider_from_model_name.startswith("ollama") # Covers "ollama" and "ollama_chat"
-
-        # Known direct provider domains that LiteLLM has good defaults for.
-        # Keys are provider prefixes (lowercase), values are parts of their default domain.
+        is_ollama_model = provider_from_model_name.startswith("ollama")
         known_direct_providers_domains = {
-            "openai": "api.openai.com",
-            "anthropic": "api.anthropic.com",
-            "deepseek": "api.deepseek.com", # Native DeepSeek API
-            "google": "googleapis.com",    # For Gemini models (Vertex AI or AI Studio)
-            "cohere": "api.cohere.ai",
-            "cerebras": "api.cerebras.com" # LiteLLM's default for Cerebras
+            "openai": "api.openai.com", "anthropic": "api.anthropic.com",
+            "deepseek": "api.deepseek.com", "google": "googleapis.com",
+            "cohere": "api.cohere.ai", "cerebras": "api.cerebras.com"
         }
 
         if is_ollama_model:
-            # If it's an Ollama model, and the global api_base is NOT an Ollama-like URL (typically http://localhost...),
-            # then set api_base_for_call to None to let LiteLLM use OLLAMA_API_BASE env var or its default.
-            # Check if the global base is NOT http or NOT localhost/127.0.0.1
             if not api_base_for_call.lower().startswith("http://") or \
                not ("localhost" in api_base_for_call.lower() or "127.0.0.1" in api_base_for_call.lower()):
                 api_base_for_call = None
-                # pre_call_notes.append(f"[dim]  (Note: Testing Ollama model '{model_name_to_test}' with LiteLLM's default Ollama endpoint resolution, not global '{api_base_to_test}')[/dim]")
         elif provider_from_model_name in known_direct_providers_domains and \
              known_direct_providers_domains[provider_from_model_name] not in api_base_for_call.lower():
             if provider_from_model_name == "google":
                 api_base_for_call = "https://generativelanguage.googleapis.com"
                 pre_call_notes.append(f"[dim]  (Note: Testing '{model_name_to_test}' with explicit Google API base: '{api_base_for_call}')[/dim]")
+                completion_kwargs["proxies"] = None
+                pre_call_notes.append(f"[dim]  (Note: Explicitly disabling proxies for direct Google API call to '{model_name_to_test}')[/dim]")
             else:
-                # For other direct providers, let LiteLLM use its default by setting api_base to None
                 api_base_for_call = None
+    
+    if "gemini" in model_name_to_test.lower() or "google" in model_name_to_test.lower():
+         pre_call_notes.append(f"[bold yellow blink]DEBUG Gemini Test Params:[/bold yellow blink] model='{model_name_to_test}', api_base_for_call='{api_base_for_call}'")
 
-    if "gemini" in model_name_to_test.lower() or "google" in model_name_to_test.lower() : # Broaden check for Gemini
-        pre_call_notes.append(f"[bold yellow blink]DEBUG Gemini Test Params:[/bold yellow blink] model='{model_name_to_test}', api_base_for_call='{api_base_for_call}'")
-
-    # Prepare keyword arguments for litellm.completion
-    completion_kwargs = {}
-    if model_name_to_test and "google" in model_name_to_test.split('/')[0].lower() and \
-       api_base_for_call == "https://generativelanguage.googleapis.com":
-        completion_kwargs["proxies"] = None 
-        pre_call_notes.append(f"[dim]  (Note: Explicitly disabling proxies for direct Google API call to '{model_name_to_test}')[/dim]")
-
-    # Print all collected notes before the "Attempting..." line
     for note in pre_call_notes:
         console.print(note)
-
+    
     console.print("[yellow]  1. Attempting basic API call...[/yellow]", end="")
-
-    try:
-        response = completion(
-            model=model_name_to_test,
-            messages=test_messages,
-            api_base=api_base_for_call, # Use the potentially adjusted API base
-            temperature=temperature_for_test,
-            max_tokens=20,
-            timeout=30,
-            **completion_kwargs # Pass additional kwargs like proxies
-        )
-        response_content = response.choices[0].message.content
-        console.print(f"[green] ✓ OK[/green] (LLM: \"{response_content.strip()}\")")
-        results["available"] = "Y"
-        results["inference_time_s"] = f"{time.time() - start_time:.2f}"
-
-        console.print("[yellow]  2. Testing token counting & context...[/yellow]", end="")
+    
+    # --- Basic API Call & Thinking Test ---
+    observed_thinking_final = False
+    api_call_error_message = None
+    for attempt in range(2): # Max 2 attempts for basic call / thinking
         try:
-            context_size, _ = get_model_context_window(model_name_to_test, return_match_status=True)
-            results["context_kb"] = f"{context_size // 1000}k"
-            console.print(f"[green] ✓ OK[/green] (Context: {results['context_kb']})")
-        except Exception as e_tc:
-            console.print(f"[yellow] ⚠️ Failed[/yellow] ({e_tc})")
-            results["context_kb"] = "Error"
+            response = _perform_api_call_for_test(model_name_to_test, test_messages, api_base_for_call, temperature_for_test, 20, 30, completion_kwargs)
+            response_content = response.choices[0].message.content
+            current_attempt_thinking = response_content.strip().lower().startswith("<think>")
+            
+            if attempt == 0: # First attempt
+                console.print(f"[green] ✓ OK[/green] (LLM: \"{response_content.strip()[:60]}{'...' if len(response_content.strip()) > 60 else ''}\")")
+                results["available"] = "Y"
+                results["inference_time_s"] = f"{time.time() - start_time:.2f}"
+                api_call_error_message = None # Clear previous error if any
 
-        console.print("[yellow]  3. Testing tool calling capability...[/yellow]", end="")
-        if expect_tools:
-            dummy_tool_for_test = [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "get_dummy_data_for_test",
-                        "description": "A dummy function to test tool calling. Retrieves dummy data.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "data_type": {
-                                    "type": "string",
-                                    "description": "The type of dummy data to retrieve, e.g., 'text'."
-                                }
-                            },
-                            "required": ["data_type"]
-                        }
-                    }
-                }
-            ]
-            tool_test_messages = [{"role": "user", "content": "Can you use a tool to get dummy text data for a test?"}]
+            observed_thinking_final = current_attempt_thinking # Update with current attempt's observation
+            
+            if expected_thinking_model == observed_thinking_final: # Expectation met
+                if attempt > 0: console.print(f"[green] ✓ Retry OK[/green] (Thinking: {observed_thinking_final})")
+                break # Exit retry loop
+            elif attempt == 0: # Mismatch on first attempt, prepare to retry
+                console.print(f"[yellow] ⚠️ Thinking mismatch (Expected: {expected_thinking_model}, Got: {observed_thinking_final}). Retrying basic call...[/yellow]", end="")
+            # If mismatch on second attempt, loop will end, error logged after loop.
+
+        except Exception as e:
+            api_call_error_message = str(e)
+            if attempt == 0:
+                console.print(f"[red] ❌ API Error[/red]: {api_call_error_message[:150]}{'...' if len(api_call_error_message) > 150 else ''}")
+                results["error_details"] += f"Basic API call failed (1st attempt): {api_call_error_message}\n"
+            else: # Error on retry
+                console.print(f"[red] ❌ Retry API Error[/red]: {api_call_error_message[:150]}{'...' if len(api_call_error_message) > 150 else ''}")
+                results["error_details"] += f"Basic API call failed (2nd attempt): {api_call_error_message}\n"
+            if "authentication" in api_call_error_message.lower() or "api key" in api_call_error_message.lower() or "401" in api_call_error_message:
+                results["error_details"] += f" (Hint: Check {api_key_name_hint})\n"
+            elif "model_not_found" in api_call_error_message.lower() or ("404" in api_call_error_message and "Model" in api_call_error_message):
+                results["error_details"] += f" (Hint: Model '{model_name_to_test}' not found or misspelled at '{api_base_to_test}')\n"
+            
+            if attempt == 0 and not (expected_thinking_model == observed_thinking_final): # If first attempt failed and thinking was also a concern
+                pass # Retry will happen
+            else: # If error on retry, or error on first try and thinking wasn't the issue to retry for
+                break # Exit retry loop, error is logged
+
+    results["is_thinking_model"] = "Y" if observed_thinking_final else "N"
+    if api_call_error_message and results["available"] == "N": # If still not available after retries
+        if results["inference_time_s"] == "N/A": results["inference_time_s"] = f"{time.time() - start_time:.2f}"
+        return results # Cannot proceed if basic API call failed
+
+    if expected_thinking_model != observed_thinking_final:
+        mismatch_note = f"Thinking model expectation mismatch: Expected '{expected_thinking_model}', Got '{observed_thinking_final}' after retries."
+        results["error_details"] += mismatch_note + "\n"
+        console.print(f"[yellow]  {mismatch_note}[/yellow]")
+
+
+    # --- Token Counting & Context (uses pre-defined expectation) ---
+    console.print("[yellow]  2. Testing token counting & context...[/yellow]", end="")
+    if results["context_kb"] != "N/A": # If context was defined
+        console.print(f"[green] ✓ OK[/green] (Context: {results['context_kb']})")
+    else:
+        console.print(f"[yellow] ⚠️ Not Defined[/yellow]")
+
+
+    # --- Tool Calling Capability Test ---
+    console.print("[yellow]  3. Testing tool calling capability...[/yellow]", end="")
+    if expected_tool_support:
+        observed_tool_support_final = "N" # Default to N if all attempts fail
+        tool_call_error_message = None
+        dummy_tool_for_test = [{"type": "function", "function": {"name": "get_dummy_data_for_test", "description": "A dummy function.", "parameters": {"type": "object", "properties": {"data_type": {"type": "string"}}, "required": ["data_type"]}}}]
+        tool_test_messages = [{"role": "user", "content": "Use a tool to get dummy text data."}]
+
+        for attempt in range(2): # Max 2 attempts for tool call
             try:
-                tool_response = completion(
-                    model=model_name_to_test,
-                    messages=tool_test_messages,
-                    tools=dummy_tool_for_test,
-                    api_base=api_base_for_call, # Use the potentially adjusted API base
-                    temperature=temperature_for_test,
-                    max_tokens=150,
-                    timeout=30,
-                    **completion_kwargs # Pass additional kwargs like proxies
-                )
+                tool_response = _perform_api_call_for_test(model_name_to_test, tool_test_messages, api_base_for_call, temperature_for_test, 150, 30, completion_kwargs, tools_list=dummy_tool_for_test)
+                tool_call_error_message = None # Clear previous error
                 if tool_response.choices[0].message.tool_calls and len(tool_response.choices[0].message.tool_calls) > 0:
-                    console.print(f"[green] ✓ Yes[/green] (Called: '{tool_response.choices[0].message.tool_calls[0].function.name}')")
-                    results["tool_support"] = "Y"
-                elif tool_response.choices[0].message.content:
-                    console.print(f"[yellow] ⚠️ No[/yellow] (Responded with text)")
-                    results["tool_support"] = "N"
-                else:
-                    console.print(f"[yellow] ⚠️ Inconclusive[/yellow]")
-                    results["tool_support"] = "N"
+                    observed_tool_support_final = "Y"
+                    if attempt == 0: console.print(f"[green] ✓ Yes[/green] (Called: '{tool_response.choices[0].message.tool_calls[0].function.name}')")
+                    else: console.print(f"[green] ✓ Retry OK[/green] (Tool Support: Yes)")
+                    break # Success, exit retry loop
+                elif tool_response.choices[0].message.content: # Responded with text, no tool call
+                    observed_tool_support_final = "N"
+                    if attempt == 0: console.print(f"[yellow] ⚠️ No[/yellow] (Responded with text)")
+                    # If mismatch on first attempt, will retry. If still mismatch on second, error logged after loop.
+                else: # Inconclusive
+                    observed_tool_support_final = "N"
+                    if attempt == 0: console.print(f"[yellow] ⚠️ Inconclusive[/yellow]")
+
+                if observed_tool_support_final == "Y": break # Should be caught by tool_calls check above, but for safety
+                if attempt == 0: # Mismatch on first attempt, prepare to retry
+                     console.print(f"[yellow] Retrying tool call test...[/yellow]", end="")
+
             except Exception as e_tool_call:
-                console.print(f"[red] ❌ Error[/red] ({e_tool_call})")
-                results["tool_support"] = "Error"
-                if not results["error_details"]: results["error_details"] = f"Tool call test: {e_tool_call}"
-        else:
-            console.print(" [dim]N/A[/dim]")
-            results["tool_support"] = "N/A"
-    except httpx.ConnectError as e:
-        console.print(f"[red] ❌ Connection Error[/red] ({api_base_to_test or 'Default LiteLLM endpoint'})")
-        results["available"] = "N"
-        results["error_details"] = f"Connection Error: {e}"
-    except httpx.TimeoutException as e:
-        console.print(f"[red] ❌ Timeout[/red]")
-        results["available"] = "N"
-        results["error_details"] = f"Timeout: {e}"
-    except Exception as e:
-        error_str = str(e)
-        # Display a truncated version of the error directly on the CLI
-        console.print(f"[red] ❌ API Error[/red]: {error_str[:250]}{'...' if len(error_str) > 250 else ''}")
-        results["available"] = "N"
-        results["error_details"] = error_str
-        if "authentication" in error_str.lower() or "api key" in error_str.lower() or "401" in error_str:
-            results["error_details"] += f" (Hint: Check {api_key_name_hint})"
-        elif "model_not_found" in error_str.lower() or ("404" in error_str and "Model" in error_str):
-            results["error_details"] += f" (Hint: Model '{model_name_to_test}' not found or misspelled at '{api_base_to_test}')"
-    if results["available"] == "N" and results["inference_time_s"] == "N/A":
+                tool_call_error_message = str(e_tool_call)
+                observed_tool_support_final = "Error"
+                if attempt == 0:
+                    console.print(f"[red] ❌ Error[/red] ({tool_call_error_message[:100]})")
+                    results["error_details"] += f"Tool call test failed (1st attempt): {tool_call_error_message}\n"
+                    console.print(f"[yellow] Retrying tool call test...[/yellow]", end="")
+                else: # Error on retry
+                    console.print(f"[red] ❌ Retry Error[/red] ({tool_call_error_message[:100]})")
+                    results["error_details"] += f"Tool call test failed (2nd attempt): {tool_call_error_message}\n"
+                    break # Exit retry loop, error is logged
+        
+        results["tool_support"] = observed_tool_support_final
+        if expected_tool_support and observed_tool_support_final != "Y":
+            mismatch_note = f"Tool support expectation mismatch: Expected 'Y', Got '{observed_tool_support_final}' after retries."
+            results["error_details"] += mismatch_note + "\n"
+            console.print(f"[yellow]  {mismatch_note}[/yellow]")
+        elif not expected_tool_support and observed_tool_support_final == "Y":
+            mismatch_note = f"Tool support expectation mismatch: Expected 'N', Got 'Y'."
+            results["error_details"] += mismatch_note + "\n" # More of a note
+            console.print(f"[dim]  {mismatch_note}[/dim]")
+            
+    else: # Not expected to support tools
+        console.print(" [dim]N/A (Not Expected)[/dim]")
+        results["tool_support"] = "N/A"
+
+    if results["available"] == "N" and results["inference_time_s"] == "N/A": # Ensure time is recorded if initial call failed
          results["inference_time_s"] = f"{time.time() - start_time:.2f}"
     return results
+
 
 def test_inference_endpoint(specific_model_name: str = None):
     """Tests all configured inference endpoints and capabilities, then exits."""
@@ -1320,107 +1335,103 @@ def test_inference_endpoint(specific_model_name: str = None):
         console.print(f"[bold blue]🧪 Testing Specific Model: [cyan]{specific_model_name}[/cyan]...[/bold blue]")
     else:
         console.print("[bold blue]🧪 Testing All Configured Inference Endpoints & Capabilities...[/bold blue]")
-        console.print("[dim]Note: This test covers models from MODEL_CONTEXT_WINDOWS and explicitly configured role-based models.[/dim]")
+        console.print("[dim]Note: This test covers models from MODEL_CONFIGURATIONS and explicitly configured role-based models.[/dim]")
     
     api_base_url = get_config_value("api_base", DEFAULT_LITELLM_API_BASE)
     role_based_models_config = [
         {"label": "DEFAULT",   "name_var": LITELLM_MODEL_DEFAULT,   "expect_tools": True},
-        {"label": "ROUTING",   "name_var": LITELLM_MODEL_ROUTING,   "expect_tools": False}, # Usually no tools
+        {"label": "ROUTING",   "name_var": LITELLM_MODEL_ROUTING,   "expect_tools": False},
         {"label": "TOOLS",     "name_var": LITELLM_MODEL_TOOLS,     "expect_tools": True},
-        {"label": "CODING",    "name_var": LITELLM_MODEL_CODING,    "expect_tools": False}, # Usually no general tools
-        {"label": "KNOWLEDGE", "name_var": LITELLM_MODEL_KNOWLEDGE, "expect_tools": False}, # Usually no tools
+        {"label": "CODING",    "name_var": LITELLM_MODEL_CODING,    "expect_tools": False},
+        {"label": "KNOWLEDGE", "name_var": LITELLM_MODEL_KNOWLEDGE, "expect_tools": False},
     ]
-    model_details = {}
+    
     default_model_available = False
     all_results = []
     overall_success = True
     
-    # First, gather all known models from MODEL_CONTEXT_WINDOWS and roles
-    all_known_models_set = set(MODEL_CONTEXT_WINDOWS.keys())
-    for config in role_based_models_config:
-        model_name_val = config["name_var"]
+    all_known_models_from_config = set(MODEL_CONFIGURATIONS.keys())
+    for config_item in role_based_models_config: # Use config_item to avoid conflict
+        model_name_val = config_item["name_var"]
         if model_name_val:
-            all_known_models_set.add(model_name_val)
+            all_known_models_from_config.add(model_name_val)
 
     models_to_test_set = set()
     if specific_model_name:
-        if "*" in specific_model_name or "?" in specific_model_name: # Wildcard detected
+        if "*" in specific_model_name or "?" in specific_model_name:
             console.print(f"[dim]Filtering models with wildcard: '{specific_model_name}'[/dim]")
-            for model_n in all_known_models_set:
+            for model_n in all_known_models_from_config:
                 if fnmatch.fnmatch(model_n, specific_model_name):
                     models_to_test_set.add(model_n)
             if not models_to_test_set:
                 console.print(f"[yellow]Warning: No models matched the wildcard pattern '{specific_model_name}'.[/yellow]")
-        else: # Specific model name without wildcard
+        else:
             models_to_test_set = {specific_model_name}
-            if specific_model_name not in all_known_models_set:
-                # This warning is useful if a user types a specific name not in our known lists.
-                # We'll still attempt to test it directly.
-                console.print(f"[yellow]Warning: Model '{specific_model_name}' is not in the known model lists (MODEL_CONTEXT_WINDOWS or configured roles). Testing it directly.[/yellow]")
-    else: # Test all known models
-        models_to_test_set = all_known_models_set
+            if specific_model_name not in all_known_models_from_config:
+                console.print(f"[yellow]Warning: Model '{specific_model_name}' is not in MODEL_CONFIGURATIONS or configured roles. Testing it directly with default expectations.[/yellow]")
+    else:
+        models_to_test_set = all_known_models_from_config
 
-    # Populate model_details for roles, regardless of single or all test mode
-    model_details = {} # Re-initialize here to ensure it's fresh based on models_to_test_set
-    for config in role_based_models_config:
-        model_name_val = config["name_var"] # Use a different variable name to avoid confusion
-        if model_name_val: # Check if the model name from config is not None or empty
-            if model_name_val not in model_details:
-                model_details[model_name_val] = {"roles": [], "expect_tools": config["expect_tools"]}
-            model_details[model_name_val]["roles"].append(config["label"])
-            if config["expect_tools"]: # If any role for this model expects tools, set it to true for the test
-                model_details[model_name_val]["expect_tools"] = True
+    # Populate model_details for roles, this helps in labeling if a model serves a specific role
+    # This is separate from the primary model_expectations fetched from MODEL_CONFIGURATIONS
+    role_details_map = {} 
+    for config_item in role_based_models_config:
+        model_name_val = config_item["name_var"]
+        if model_name_val:
+            if model_name_val not in role_details_map:
+                role_details_map[model_name_val] = {"roles": [], "role_expect_tools": config_item["expect_tools"]}
+            role_details_map[model_name_val]["roles"].append(config_item["label"])
+            # If any role expects tools, the role_expect_tools for that model name becomes True
+            if config_item["expect_tools"]:
+                 role_details_map[model_name_val]["role_expect_tools"] = True
     
     if not models_to_test_set:
         console.print("[yellow]Warning: No models specified or found to test.[/yellow]")
         sys.exit(0)
 
-    for model_name_iter in sorted(list(models_to_test_set)): # Use a different loop variable
+    for model_name_iter in sorted(list(models_to_test_set)):
         if not model_name_iter:
             all_results.append({
                 "label": "Invalid/Empty", "name": "Not Configured", "available": "N/A",
-                "tool_support": "N/A", "context_kb": "N/A", "inference_time_s": "N/A", "error_details": "Empty model name encountered."
+                "tool_support": "N/A", "is_thinking_model": "N/A", "context_kb": "N/A", 
+                "inference_time_s": "N/A", "error_details": "Empty model name encountered."
             })
             continue
 
-        current_model_details = model_details.get(model_name_iter)
+        current_role_details = role_details_map.get(model_name_iter)
         display_label = model_name_iter
-        expect_tools_for_this_model = True # Default for models only from MODEL_CONTEXT_WINDOWS
+        # Default role_expect_tools to False if not found in role_details_map;
+        # _test_single_model_capabilities will prioritize MODEL_CONFIGURATIONS
+        role_tool_expectation = current_role_details["role_expect_tools"] if current_role_details else False
 
-        if current_model_details:
-            display_label = f"{model_name_iter} ({', '.join(current_model_details['roles'])})"
-            expect_tools_for_this_model = current_model_details['expect_tools']
-        elif model_name_iter in MODEL_CONTEXT_WINDOWS and not specific_model_name: # Only add (Context Map) if not specifically testing
-            display_label = f"{model_name_iter} (Context Map)"
+
+        if current_role_details:
+            display_label = f"{model_name_iter} ({', '.join(current_role_details['roles'])})"
+        elif model_name_iter in MODEL_CONFIGURATIONS and not specific_model_name:
+             display_label = f"{model_name_iter} (Configured)" # Changed from (Context Map)
         
-        api_base_for_model = api_base_url
+        api_base_for_model = api_base_url # Global API base
         result = _test_single_model_capabilities(
             model_label=display_label,
             model_name_to_test=model_name_iter,
             api_base_to_test=api_base_for_model,
-            expect_tools=expect_tools_for_this_model
+            role_expect_tools=role_tool_expectation 
         )
         all_results.append(result)
         if result["available"] != "Y":
             overall_success = False
-        if model_name_iter == LITELLM_MODEL_DEFAULT and result["available"] == "Y": # Check if the default model is one of the tested and available
+        if model_name_iter == LITELLM_MODEL_DEFAULT and result["available"] == "Y":
             default_model_available = True
             
-    # Summarize errors if DEFAULT model is available
-    if SHOW_TEST_INFERENCE_NOTES_ERRORS_COLUMN: # Only summarize if the column will be shown
+    if SHOW_TEST_INFERENCE_NOTES_ERRORS_COLUMN:
         if default_model_available:
             console.print(f"\n[dim]Default model ([cyan]{LITELLM_MODEL_DEFAULT}[/cyan]) is available. Attempting to summarize error messages for other models...[/dim]")
             for res in all_results:
-                # Ensure error_details is a string before attempting to summarize
-                # This handles cases where it might be None or another type if a model was skipped early.
                 if not isinstance(res.get("error_details"), str):
-                    res["error_details"] = str(res.get("error_details", "")) # Convert to string or empty string
-
-                # Only summarize for other models that failed and have error details
+                    res["error_details"] = str(res.get("error_details", ""))
                 if res["name"] != LITELLM_MODEL_DEFAULT and res["available"] == "N" and res["error_details"]:
                     original_error = res["error_details"]
                     res["error_details"] = _summarize_error_message(original_error, LITELLM_MODEL_DEFAULT, api_base_url)
-
 
     console.print("\n\n[bold green]📊 Inference Test Summary[/bold green]")
     summary_table = Table(title="Model Capabilities Test Results", show_lines=True)
@@ -1428,6 +1439,7 @@ def test_inference_endpoint(specific_model_name: str = None):
     summary_table.add_column("Model Name (Actual)", style="magenta", max_width=40)
     summary_table.add_column("Available", justify="center")
     summary_table.add_column("Tool Support", justify="center")
+    summary_table.add_column("Thinking", justify="center")
     summary_table.add_column("Context", justify="right")
     summary_table.add_column("Time (s)", justify="right")
     if SHOW_TEST_INFERENCE_NOTES_ERRORS_COLUMN:
@@ -1436,29 +1448,37 @@ def test_inference_endpoint(specific_model_name: str = None):
 
     for res in all_results:
         available_style = "green" if res["available"] == "Y" else "red" if res["available"] == "N" else "yellow"
-        tool_style = "green" if res["tool_support"] == "Y" else "red" if res["tool_support"] == "N" else "dim"
+        tool_style = "green" if res.get("tool_support") == "Y" else "red" if res.get("tool_support") == "N" else "dim"
+        thinking_style = "green" if res.get("is_thinking_model") == "Y" else "dim"
             
-        row_data = [res["label"], res["name"], f"[{available_style}]{res['available']}[/{available_style}]", f"[{tool_style}]{res['tool_support']}[/{tool_style}]", res["context_kb"], res["inference_time_s"]]
+        row_data = [
+            res["label"], 
+            res["name"], 
+            f"[{available_style}]{res['available']}[/{available_style}]", 
+            f"[{tool_style}]{res.get('tool_support', 'N/A')}[/{tool_style}]",
+            f"[{thinking_style}]{res.get('is_thinking_model', 'N')}[/{thinking_style}]",
+            res.get("context_kb", "N/A"), 
+            res.get("inference_time_s", "N/A")]
         if SHOW_TEST_INFERENCE_NOTES_ERRORS_COLUMN:
-            row_data.append(res["error_details"])
+            row_data.append(res.get("error_details", ""))
         summary_table.add_row(*row_data)
 
-    # Calculate and add Totals/Summary Stats row
     total_models_tested = len([res for res in all_results if res["available"] != "N/A" and res["name"] != "Not Configured"])
     total_available_y = sum(1 for res in all_results if res["available"] == "Y")
     total_available_n = sum(1 for res in all_results if res["available"] == "N") 
-    total_tool_support_y = sum(1 for res in all_results if res["tool_support"] == "Y")
+    total_tool_support_y = sum(1 for res in all_results if res.get("tool_support") == "Y")
+    total_thinking_y = sum(1 for res in all_results if res.get("is_thinking_model") == "Y")
     
-    # Context stats
-    total_context_known = sum(1 for res in all_results if res["context_kb"] != "N/A" and res["context_kb"] != "Error")
-    total_context_unknown_or_error = sum(1 for res in all_results if res["context_kb"] == "N/A" or res["context_kb"] == "Error")
+    total_context_known = sum(1 for res in all_results if res.get("context_kb", "N/A") not in ["N/A", "Error"])
+    total_context_unknown_or_error = sum(1 for res in all_results if res.get("context_kb", "N/A") in ["N/A", "Error"])
 
-    summary_table.add_section() # Adds a visual separator line
+    summary_table.add_section()
     overall_stats_row_data = [
         "[bold]Overall Stats[/bold]",
         f"[dim]{total_models_tested} models tested[/dim]",
         f"[bold green]{total_available_y}Y[/bold green] / [bold red]{total_available_n}N[/bold red]", 
-        f"[bold green]{total_tool_support_y}Y[/bold green]", 
+        f"[bold green]{total_tool_support_y}Y[/bold green]",
+        f"[bold green]{total_thinking_y}Y[/bold green]",
         f"[bold green]{total_context_known}✓[/bold green] / [bold red]{total_context_unknown_or_error}?[/bold red]", 
         "N/A", 
     ]
@@ -1513,24 +1533,26 @@ def main():
         '--test-inference',
         metavar='MODEL_NAME',
         type=str,
-        nargs='?', # Makes the argument optional
-        const='__TEST_ALL_MODELS__', # Special value if flag is present without an argument
+        nargs='?', 
+        const='__TEST_ALL_MODELS__', 
         help='Test capabilities. If MODEL_NAME is provided (wildcards * and ? supported), tests matching models. Otherwise, tests all known/configured models.'
     )
     args = parser.parse_args()
     clear_screen()
-    if args.test_inference is not None: # If the flag was used
+    if args.test_inference is not None: 
         if args.test_inference == '__TEST_ALL_MODELS__':
-            test_inference_endpoint(specific_model_name=None) # Test all
+            test_inference_endpoint(specific_model_name=None) 
         else:
-            test_inference_endpoint(specific_model_name=args.test_inference) # Test specific model
+            test_inference_endpoint(specific_model_name=args.test_inference) 
 
     current_model_name_for_display = get_config_value("model", LITELLM_MODEL_DEFAULT)
-    context_window_size, used_default = get_model_context_window(current_model_name_for_display, return_match_status=True)
-    context_window_display = f"{context_window_size // 1000}k tokens"
-    if used_default:
-        context_window_display += " (default)"
-    instructions = f"""🧠 Default Model: [bold magenta]{current_model_name_for_display}[/bold magenta] ([dim]{context_window_display}[/dim])
+    # Use get_model_context_window for display, as it's simpler for this purpose
+    context_window_size_display, used_default_display = get_model_context_window(current_model_name_for_display, return_match_status=True)
+    context_window_display_str = f"{context_window_size_display // 1000}k tokens"
+    if used_default_display:
+        context_window_display_str += " (default)"
+        
+    instructions = f"""🧠 Default Model: [bold magenta]{current_model_name_for_display}[/bold magenta] ([dim]{context_window_display_str}[/dim])
    Routing: [dim]{LITELLM_MODEL_ROUTING or 'Not Set'}[/dim] | Tools: [dim]{LITELLM_MODEL_TOOLS or 'Not Set'}[/dim]
    Coding: [dim]{LITELLM_MODEL_CODING or 'Not Set'}[/dim] | Knowledge: [dim]{LITELLM_MODEL_KNOWLEDGE or 'Not Set'}[/dim]
 
@@ -1572,13 +1594,14 @@ def main():
             if conversation_history:
                 try:
                     active_model_for_prompt_context = get_config_value("model", LITELLM_MODEL_DEFAULT)
-                    context_window_size, used_default_window_due_to_no_match = get_model_context_window(active_model_for_prompt_context, return_match_status=True)
+                    # Use get_model_context_window for prompt display
+                    context_window_size_prompt, used_default_prompt = get_model_context_window(active_model_for_prompt_context, return_match_status=True)
                     if conversation_history and active_model_for_prompt_context:
                         tokens_used = token_counter(model=active_model_for_prompt_context, messages=conversation_history)
-                        if context_window_size > 0:
-                            percentage_used = (tokens_used / context_window_size) * 100
+                        if context_window_size_prompt > 0:
+                            percentage_used = (tokens_used / context_window_size_prompt) * 100
                             default_note = ""
-                            if used_default_window_due_to_no_match:
+                            if used_default_prompt:
                                 default_note = " (default window)"
                             prompt_prefix = f"[Ctx: {percentage_used:.0f}%{default_note}] "
                         else:
@@ -1596,34 +1619,21 @@ def main():
         if user_input.lower() in ["exit", "quit", "/exit", "/quit"]:
             console.print("[bold bright_blue]👋 Goodbye! Happy coding![/bold bright_blue]")
             sys.exit(0)
-        if try_handle_add_command(user_input):
-            continue
-        if try_handle_set_command(user_input):
-            continue
-        if try_handle_help_command(user_input):
-            continue
-        if try_handle_shell_command(user_input):
-            continue
-        if try_handle_session_command(user_input):
-            continue
-        if try_handle_rules_command(user_input):
-            continue
-        if try_handle_context_command(user_input):
-            continue
-        if try_handle_prompt_command(user_input):
-            continue
-        if try_handle_script_command(user_input):
-            continue
-        if try_handle_ask_command(user_input):
-            continue
-        if try_handle_time_command(user_input):
-            continue
-        if try_handle_test_command(user_input):
-            continue
-        target_model_name = get_config_value("model", LITELLM_MODEL_DEFAULT)
-        response_data = stream_llm_response(user_input)
-        if response_data.get("error"):
-            pass
+        if try_handle_add_command(user_input): continue
+        if try_handle_set_command(user_input): continue
+        if try_handle_help_command(user_input): continue
+        if try_handle_shell_command(user_input): continue
+        if try_handle_session_command(user_input): continue
+        if try_handle_rules_command(user_input): continue
+        if try_handle_context_command(user_input): continue
+        if try_handle_prompt_command(user_input): continue
+        if try_handle_script_command(user_input): continue
+        if try_handle_ask_command(user_input): continue
+        if try_handle_time_command(user_input): continue
+        if try_handle_test_command(user_input): continue
+        
+        stream_llm_response(user_input)
+
     console.print("[bold blue]✨ Session finished. Thank you for using AI Engineer![/bold blue]")
     sys.exit(0)
 
@@ -1716,13 +1726,13 @@ def try_handle_test_command(user_input: str) -> bool:
     sub_command = parts[0].lower() if parts else ""
     if sub_command == "inference":
         model_to_test = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
-        if model_to_test:
-            console.print(f"[dim]Testing specific model: {model_to_test}[/dim]")
-        test_inference_endpoint(specific_model_name=model_to_test) # Pass None to test all, or model_name
+        if model_to_test: # This was specific_model_name before, now model_to_test
+            console.print(f"[dim]Testing specific model pattern: {model_to_test}[/dim]")
+        test_inference_endpoint(specific_model_name=model_to_test)
         return True
     elif sub_command == "all":
         console.print("[bold blue]Running all available tests...[/bold blue]")
-        test_inference_endpoint(specific_model_name=None) # "/test all" implies testing all configured/known models
+        test_inference_endpoint(specific_model_name=None)
         return True
     else:
         console.print("[yellow]Usage: /test <subcommand> [arguments][/yellow]")
