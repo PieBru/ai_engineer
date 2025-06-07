@@ -117,7 +117,7 @@ AI Engineer supports several command-line options to customize its startup behav
 *   `--script SCRIPT_PATH`: Execute a script file (containing AI Engineer commands, one per line) on startup.
 *   `--noconfirm`: Skip confirmation prompts when using `--script`.
 *   `--time`: Enable timestamp display in the user prompt from the start.
-*   `--test-inference`: Test all configured LLM inference endpoints (Default, Routing, Tools, Coding, Knowledge): basic API call, token counting, tool calling capability, and then exit. This is useful for verifying your API keys, model names, API base URL, and model capabilities.
+*   `--test-inference [MODEL_PATTERN]`: Test capabilities. If `MODEL_PATTERN` (wildcards `*` and `?` supported) is provided, tests matching models. Otherwise, tests all models from `MODEL_CONTEXT_WINDOWS` and configured roles. Exits after testing.
 
 ### Usage Examples
 
@@ -220,7 +220,7 @@ Configuration is primarily managed through environment variables. If an environm
 
 *   **Testing Utilities (`/test` command)**:
     *   `/test all`: Runs all available diagnostic tests (currently, this executes the inference test).
-    *   `/test inference`: Performs the same checks as the `--test-inference` CLI option, testing all configured models (Default, Routing, Tools, Coding, Knowledge) for connectivity, token counting, and tool calling capability.
+    *   `/test inference [model_pattern]`: Performs capability tests. If `model_pattern` (wildcards `*` and `?` supported) is provided, tests matching models. Otherwise, performs the same comprehensive checks as the `--test-inference` CLI option (when no pattern is provided), testing all known/configured models.
 
 ### **High-Level Architecture**
 The following diagram illustrates the main components and their interactions within AI Engineer:

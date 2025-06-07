@@ -54,9 +54,10 @@ MODEL_CONTEXT_WINDOWS: Dict[str, int] = {
     "openrouter/deepseek/deepseek-r1-distill-qwen-32b:free": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
     "openrouter/qwen/qwen-2.5-coder-32b-instruct:free": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
 
-    "ollama_chat/codestral:22b-v0.1-q5_K_S": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/deepcoder:14b-preview-q8_0": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
     "ollama_chat/devstral:latest": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
+    "ollama_chat/codestral:22b-v0.1-q5_K_S": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
+    "ollama_chat/qwen2.5-coder:14b-instruct-q6_K": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
+    "ollama_chat/deepcoder:14b-preview-q8_0": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
     "ollama_chat/gemma3:27b-it-qat": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
     "ollama_chat/hf.co/bartowski/google_gemma-3-27b-it-qat-GGUF:Q6_K": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
     "ollama_chat/hf.co/bartowski/mistralai_Mistral-Small-3.1-24B-Instruct-2503-GGUF:Q5_K_M": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
@@ -72,9 +73,20 @@ MODEL_CONTEXT_WINDOWS: Dict[str, int] = {
     "ollama_chat/phi4-mini:3.8b-q8_0": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
     "ollama_chat/phi4-reasoning:latest": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
     "ollama_chat/qwen2.5:14b-instruct-q6_K": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/qwen2.5-coder:14b-instruct-q6_K": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
+    "ollama_chat/qwen2.5:0.5b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
+    "ollama_chat/qwen2.5:1.5b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
+    "ollama_chat/qwen2.5:3b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
+    "ollama_chat/qwen2.5:7b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
+    "ollama_chat/qwen2.5:14b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
+    #"ollama_chat/qwen2.5:32b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
+    "ollama_chat/qwen2.5:72b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
+    "ollama_chat/qwen3:0.6b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
+    "ollama_chat/qwen3:1.7b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
+    "ollama_chat/qwen3:4b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
+    "ollama_chat/qwen3:8b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
     "ollama_chat/qwen3:14b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
-    "ollama_chat/qwen3:32b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
+    #"ollama_chat/qwen3:30b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
+    #"ollama_chat/qwen3:32b": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
     "ollama_chat/qwq:latest": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
     "ollama_chat/THUDM_GLM-4-32B-0414-Q5_K_M.gguf:latest": DEFAULT_CONTEXT_WINDOW, # FIXME unknown
 
