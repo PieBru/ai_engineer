@@ -111,6 +111,14 @@ For when you want to preload files into conversation context:
    python3 ai_eng.py
    ```
 
+### Command-Line Interface (CLI) Options
+AI Engineer supports several command-line options to customize its startup behavior:
+*   `--version`: Display the application version and exit.
+*   `--script SCRIPT_PATH`: Execute a script file (containing AI Engineer commands, one per line) on startup.
+*   `--noconfirm`: Skip confirmation prompts when using `--script`.
+*   `--time`: Enable timestamp display in the user prompt from the start.
+*   `--test-inference`: Test the configured LLM inference endpoint with a simple API call, check token counting, and then exit. This is useful for verifying your API key, model name, and API base URL configuration before starting an interactive session.
+
 ### Usage Examples
 
 #### **Natural Conversation with Automatic File Operations**
@@ -209,6 +217,10 @@ Configuration is primarily managed through environment variables. If an environm
     *   `list`: List available rule files in the `./.aie_rules/` directory.
     *   `add <rule-file>`: Add rules from a specified markdown file to the current session's system prompt.
     *   `reset`: Empties the current system prompt, then asks for confirmation (Y/n, default Y) to load default rules from `./.aie_rules/_default.md`. If confirmed, it effectively runs `rules add _default.md`.
+
+*   **Testing Utilities (`/test` command)**:
+    *   `/test all`: Runs all available diagnostic tests (currently, this executes the inference test).
+    *   `/test inference`: Performs the same checks as the `--test-inference` CLI option, verifying LLM endpoint connectivity and token counting.
 
 ### **High-Level Architecture**
 The following diagram illustrates the main components and their interactions within AI Engineer:

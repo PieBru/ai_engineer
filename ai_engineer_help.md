@@ -58,6 +58,13 @@
     Call `/shell` without arguments for usage and examples.
     *(Warning: Executing arbitrary shell commands can be risky.)*
 
+
+*   **`/test`** `<subcommand> [arguments]` - Run diagnostic tests.
+    Call `/test` without arguments for detailed usage.
+    Subcommands:
+    - `all`: Run all available tests (currently runs 'inference').
+    - `inference`: Test the LLM inference endpoint configuration and connectivity.
+
 *   **`/time`** - Toggle the display of a timestamp in the user prompt.
     Example: `[Ctx: 5%, 16:04:52] You>`
 

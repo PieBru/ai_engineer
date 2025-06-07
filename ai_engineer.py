@@ -1404,6 +1404,74 @@ def stream_llm_response(user_message: str):
 # 7. Main interactive loop
 # --------------------------------------------------------------------------------
 
+def test_inference_endpoint():
+    """Tests the configured inference endpoint and token counting, then exits."""
+    console.print("[bold blue]🧪 Testing inference endpoint configuration...[/bold blue]")
+    # Get current config using the utility function that respects overrides and env vars
+    model_name = get_config_value("model", DEFAULT_LITELLM_MODEL)
+    api_base_url = get_config_value("api_base", DEFAULT_LITELLM_API_BASE)
+    # Use a low, fixed temperature for the test for predictability
+    temperature_for_test = 0.1
+
+    console.print(f"  Configured Model: [cyan]{model_name}[/cyan]")
+    console.print(f"  Configured API Base: [cyan]{api_base_url if api_base_url else 'LiteLLM default/environment configured'}[/cyan]")
+    console.print(f"  Temperature for test: [cyan]{temperature_for_test}[/cyan]")
+
+    test_messages = [{"role": "user", "content": "Test: Respond with 'ok'."}]
+    api_key_name_hint = "API key" # Generic term
+    # Try to infer API key name for better user message
+    if api_base_url:
+        if "openai" in api_base_url.lower() or "gpt-" in model_name.lower():
+            api_key_name_hint = "OPENAI_API_KEY"
+        elif "deepseek" in api_base_url.lower() or "deepseek" in model_name.lower():
+            api_key_name_hint = "DEEPSEEK_API_KEY"
+        elif "anthropic" in api_base_url.lower() or "claude" in model_name.lower():
+            api_key_name_hint = "ANTHROPIC_API_KEY"
+        elif "openrouter" in api_base_url.lower():
+            api_key_name_hint = "OPENROUTER_API_KEY"
+
+    try:
+        console.print("\n[yellow]Attempting a small API call...[/yellow]")
+        response = completion(
+            model=model_name,
+            messages=test_messages,
+            api_base=api_base_url, # Pass None if not set, litellm handles it
+            temperature=temperature_for_test,
+            max_tokens=20, # Keep it small for a test
+            timeout=30 # Generous timeout for a test
+        )
+        response_content = response.choices[0].message.content
+        console.print(f"[green]✓ API call successful.[/green]")
+        console.print(f"  LLM Response: \"{response_content.strip()}\"")
+
+        # Correlated check: Token counting
+        try:
+            tokens_used = token_counter(model=model_name, messages=test_messages)
+            console.print(f"[green]✓ Token counting successful for model '{model_name}'.[/green]")
+            console.print(f"  Tokens for test message: {tokens_used}")
+        except Exception as e_tc:
+            console.print(f"[yellow]⚠️ Token counting for model '{model_name}' failed or is not supported by LiteLLM: {e_tc}[/yellow]")
+
+        console.print("\n[bold green]✅ Inference endpoint test passed.[/bold green]")
+        sys.exit(0)
+
+    except httpx.ConnectError as e:
+        console.print(f"[bold red]❌ API Call Failed: Connection Error.[/bold red]\n   Could not connect to API base: {api_base_url or 'Default LiteLLM endpoint'}\n   Details: {e}\n   Troubleshooting:\n     - Check internet connection.\n     - Verify `LITELLM_API_BASE` URL if set.")
+        sys.exit(1)
+    except httpx.TimeoutException as e:
+        console.print(f"[bold red]❌ API Call Failed: Timeout.[/bold red]\n   Request to {api_base_url or 'Default LiteLLM endpoint'} timed out.\n   Details: {e}\n   Troubleshooting:\n     - Server might be slow/overloaded.\n     - Check network for high latency.")
+        sys.exit(1)
+    except Exception as e: # Catch other litellm or general errors
+        error_str = str(e)
+        console.print(f"[bold red]❌ API Call Failed: An error occurred.[/bold red]\n   Details: {error_str}\n   Troubleshooting:")
+        if "authentication" in error_str.lower() or "api key" in error_str.lower() or "401" in error_str:
+            console.print(f"     - Check your {api_key_name_hint} environment variable.\n     - Ensure it's valid and has permissions for '{model_name}'.")
+        elif "model_not_found" in error_str.lower() or ("404" in error_str and "Model" in error_str):
+             console.print(f"     - Model '{model_name}' might be unavailable at '{api_base_url or 'Default LiteLLM endpoint'}' or misspelled.\n     - Check `LITELLM_MODEL` and `LITELLM_API_BASE`.")
+        else:
+            console.print(f"     - Review `LITELLM_MODEL` and `LITELLM_API_BASE`.\n     - Check provider's status page.")
+        sys.exit(1)
+
 def clear_screen():
     """Clears the terminal screen."""
     # For Windows
@@ -1439,9 +1507,17 @@ def main():
         action='store_true',
         help='Enable timestamp display in the user prompt.'
     )
+    parser.add_argument(
+        '--test-inference-endpoint',
+        action='store_true',
+        help='Test the configured inference endpoint with a simple API call, check token counting, and exit.'
+    )
     args = parser.parse_args()
 
     clear_screen()
+    if args.test_inference_endpoint:
+        test_inference_endpoint() # This function will call sys.exit()
+
     # Get the current model name to display in the welcome panel
     current_model_name_for_display = get_config_value("model", DEFAULT_LITELLM_MODEL)
     # Get context window size for the current model
