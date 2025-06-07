@@ -63,7 +63,7 @@
     Call `/test` without arguments for detailed usage.
     Subcommands:
     - `all`: Run all available tests (currently runs 'inference').
-    - `inference`: Test the LLM inference endpoint configuration and connectivity.
+    - `inference`: Tests all models listed in the internal `MODEL_CONTEXT_WINDOWS` map for connectivity, token counting, and tool calling capability.
 
 *   **`/time`** - Toggle the display of a timestamp in the user prompt.
     Example: `[Ctx: 5%, 16:04:52] You>`

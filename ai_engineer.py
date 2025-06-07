@@ -12,6 +12,10 @@ from src.config_utils import (
     DEFAULT_LITELLM_MODEL,
     DEFAULT_LITELLM_API_BASE,
     DEFAULT_LITELLM_MAX_TOKENS,
+    DEFAULT_LITELLM_MODEL_ROUTING,
+    DEFAULT_LITELLM_MODEL_TOOLS,
+    DEFAULT_LITELLM_MODEL_CODING,
+    DEFAULT_LITELLM_MODEL_KNOWLEDGE,
     DEFAULT_REASONING_EFFORT,
     DEFAULT_REASONING_STYLE
 )
@@ -19,6 +23,12 @@ from src.config_utils import (
 # Now, define module-level configurations using these defaults
 import os
 LITELLM_MODEL = os.getenv("LITELLM_MODEL", DEFAULT_LITELLM_MODEL)
+LITELLM_MODEL_DEFAULT = LITELLM_MODEL # Alias for clarity, LITELLM_MODEL is the default
+LITELLM_MODEL_ROUTING = os.getenv("LITELLM_MODEL_ROUTING", DEFAULT_LITELLM_MODEL_ROUTING)
+LITELLM_MODEL_TOOLS = os.getenv("LITELLM_MODEL_TOOLS", DEFAULT_LITELLM_MODEL_TOOLS)
+LITELLM_MODEL_CODING = os.getenv("LITELLM_MODEL_CODING", DEFAULT_LITELLM_MODEL_CODING)
+LITELLM_MODEL_KNOWLEDGE = os.getenv("LITELLM_MODEL_KNOWLEDGE", DEFAULT_LITELLM_MODEL_KNOWLEDGE)
+
 LITELLM_API_BASE = os.getenv("LITELLM_API_BASE", DEFAULT_LITELLM_API_BASE)
 LITELLM_MAX_TOKENS = int(os.getenv("LITELLM_MAX_TOKENS", DEFAULT_LITELLM_MAX_TOKENS))
 REASONING_EFFORT = os.getenv("REASONING_EFFORT", DEFAULT_REASONING_EFFORT)
@@ -31,7 +41,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table # For risky tool confirmation
 from prompt_toolkit import PromptSession
-import time # For tool call IDs
+import time # For tool call IDs and test inference timing
 import subprocess # For /shell command
 import copy # For deepcopy
 import argparse # For command-line argument handling
@@ -41,7 +51,7 @@ import httpx # For new MCP tools
 # Import modules from src/
 from src.config_utils import (
     load_configuration as load_app_configuration, get_config_value,
-    SUPPORTED_SET_PARAMS, MAX_FILES_TO_PROCESS_IN_DIR, MAX_FILE_SIZE_BYTES,
+    SUPPORTED_SET_PARAMS, MAX_FILES_TO_PROCESS_IN_DIR, MAX_FILE_SIZE_BYTES, MODEL_CONTEXT_WINDOWS, SHOW_TEST_INFERENCE_NOTES_ERRORS_COLUMN,
     RUNTIME_OVERRIDES,
     get_model_context_window # Import the helper function
 )
@@ -54,7 +64,9 @@ from src.prompts import system_PROMPT
 from prompt_toolkit.styles import Style as PromptStyle # Keep PromptStyle import
 # Import litellm
 from litellm import completion, token_counter # Added token_counter
-from rich.markdown import Markdown as RichMarkdown # Import Rich's Markdown
+import litellm # Import the base module to set options
+import logging # For configuring logger levels
+from typing import Dict # For type hinting
 
 # Define the application version
 __version__ = "0.2.0" # Example version
@@ -62,9 +74,6 @@ __version__ = "0.2.0" # Example version
 # Initialize Rich console and prompt session
 console = Console()
 prompt_session = PromptSession(
-    # Add a bottom toolbar for persistent status messages if desired
-    # bottom_toolbar=HTML('Timestamp: <b Fg="ansired">OFF</b>'), # Example
-
     style=PromptStyle.from_dict({
         'prompt': '#0066ff bold',  # Bright blue prompt
         'completion-menu.completion': 'bg:#1e3a8a fg:#ffffff',
@@ -75,30 +84,26 @@ prompt_session = PromptSession(
 # Global state for timestamp display
 SHOW_TIMESTAMP_IN_PROMPT = False
 
-
-# Removed: def load_configuration(): ...
-# Removed: load_configuration() # Load configurations at startup
-
 # Load configurations at startup using the imported function
 load_app_configuration(console)
+
+# --- Suppress LiteLLM informational messages ---
+# Suppress the "Give Feedback / Get Help" banner
+litellm.suppress_debug_info = True
+# Suppress "LiteLLM.Info" messages by setting logger level to WARNING
+logging.getLogger("litellm").setLevel(logging.WARNING)
+# --- End LiteLLM message suppression ---
 
 class FileToCreate(BaseModel):
     path: str
     content: str
-
     model_config = ConfigDict(extra='ignore', frozen=True)
 
 class FileToEdit(BaseModel):
     path: str
     original_snippet: str
     new_snippet: str
-
     model_config = ConfigDict(extra='ignore', frozen=True)
-
-
-# Removed: system_PROMPT = dedent(...)
-# This is now imported from prompts.py
-
 
 # --------------------------------------------------------------------------------
 # 4. Helper functions
@@ -109,8 +114,6 @@ def _handle_local_mcp_stream(endpoint_url: str, timeout_seconds: int, max_data_c
     Connects to a local MCP server endpoint that provides a streaming response.
     Reads the stream and returns the aggregated data.
     """
-    # URL validation is expected to be done by the caller (execute_function_call_dict)
-    # based on the schema, but an extra check here is fine.
     try:
         parsed_url = httpx.URL(endpoint_url)
         if not (parsed_url.host.lower() in ("localhost", "127.0.0.1") and parsed_url.scheme.lower() in ("http", "https")):
@@ -127,7 +130,7 @@ def _handle_local_mcp_stream(endpoint_url: str, timeout_seconds: int, max_data_c
     try:
         with httpx.Client(timeout=timeout_config) as client:
             with client.stream("GET", endpoint_url) as response:
-                response.raise_for_status() # Check for HTTP errors like 4xx/5xx
+                response.raise_for_status()
                 for chunk in response.iter_text():
                     if chars_read + len(chunk) > max_data_chars:
                         remaining_len = max_data_chars - chars_read
@@ -141,18 +144,16 @@ def _handle_local_mcp_stream(endpoint_url: str, timeout_seconds: int, max_data_c
     except httpx.HTTPStatusError as e:
         error_detail = f"HTTP {e.response.status_code}"
         try:
-            # Ensure the response body is read before accessing .text for streaming responses
             e.response.read()
             error_detail += f" - {e.response.text[:200]}"
         except httpx.ResponseNotRead:
             error_detail += " - (Error response body could not be read for details)"
-        except Exception: # Catch any other issues during error body reading
+        except Exception:
             error_detail += " - (Failed to retrieve error response body details)"
         return f"Error connecting to local MCP stream '{endpoint_url}': {error_detail}"
     except httpx.RequestError as e:
         return f"Error connecting to local MCP stream '{endpoint_url}': {str(e)}"
     except Exception as e:
-        # This will catch unexpected errors, including ResponseNotRead if it happens outside HTTPStatusError handling
         return f"An unexpected error occurred with local MCP stream '{endpoint_url}': {str(e)}"
 
 def _handle_remote_mcp_sse(endpoint_url: str, max_events: int, listen_timeout_seconds: int) -> str:
@@ -160,7 +161,6 @@ def _handle_remote_mcp_sse(endpoint_url: str, max_events: int, listen_timeout_se
     Connects to a remote MCP server endpoint using Server-Sent Events (SSE).
     Listens for events and returns a summary of received events.
     """
-    # URL validation is expected to be done by the caller (execute_function_call_dict)
     try:
         parsed_url = httpx.URL(endpoint_url)
         if parsed_url.scheme.lower() not in ("http", "https"):
@@ -182,7 +182,7 @@ def _handle_remote_mcp_sse(endpoint_url: str, max_events: int, listen_timeout_se
 
                 current_event_data = []
                 for line in response.iter_lines():
-                    if not line: # Empty line signifies end of an event
+                    if not line:
                         if current_event_data:
                             events_received.append("".join(current_event_data))
                             current_event_data = []
@@ -191,90 +191,69 @@ def _handle_remote_mcp_sse(endpoint_url: str, max_events: int, listen_timeout_se
                     elif line.startswith("data:"):
                         current_event_data.append(line[5:].strip() + "\n")
 
-                if current_event_data and len(events_received) < max_events: # Process any trailing data
+                if current_event_data and len(events_received) < max_events:
                     events_received.append("".join(current_event_data).strip())
 
         summary = f"Received {len(events_received)} SSE event(s) from '{endpoint_url}'.\n"
-        summary += "Last few events:\n" + "\n---\n".join(events_received[-5:]) # Show last 5 events
+        summary += "Last few events:\n" + "\n---\n".join(events_received[-5:])
         return summary
     except httpx.HTTPStatusError as e:
         error_detail = f"HTTP {e.response.status_code}"
         try:
-            # Ensure the response body is read before accessing .text for streaming responses
             e.response.read()
             error_detail += f" - {e.response.text[:200]}"
         except httpx.ResponseNotRead:
             error_detail += " - (Error response body could not be read for details)"
-        except Exception: # Catch any other issues during error body reading
+        except Exception:
             error_detail += " - (Failed to retrieve error response body details)"
         return f"Error connecting to remote MCP SSE '{endpoint_url}': {error_detail}"
     except httpx.RequestError as e:
         return f"Error connecting to remote MCP SSE '{endpoint_url}': {str(e)}"
     except Exception as e:
-        # This will catch unexpected errors
         return f"An unexpected error occurred with remote MCP SSE '{endpoint_url}': {str(e)}"
-
 
 def try_handle_add_command(user_input: str) -> bool:
     command_prefix = "/add"
     stripped_input = user_input.strip()
-
-    # Strict check: input must be exactly the command or command + space + args
     if not (stripped_input.lower() == command_prefix or stripped_input.lower().startswith(command_prefix + " ")):
         return False
-
-    # If we are here, it IS an /add command.
     prefix_with_space = command_prefix + " "
     path_to_add = ""
     if stripped_input.lower().startswith(prefix_with_space):
         path_to_add = stripped_input[len(prefix_with_space):].strip()
-    elif stripped_input.lower() == command_prefix: # Just "/add"
-        path_to_add = "" # Will trigger usage message
-
+    elif stripped_input.lower() == command_prefix:
+        path_to_add = ""
     if not path_to_add:
         console.print("[yellow]Usage: /add <file_path_or_folder_path>[/yellow]")
         console.print("[yellow]  Example: /add src/my_file.py[/yellow]")
         console.print("[yellow]  Example: /add ./my_project_folder[/yellow]")
-        return True # Handled (printed usage)
+        return True
     try:
-        # Use imported normalize_path
         normalized_path = normalize_path(path_to_add)
         if os.path.isdir(normalized_path):
-            # Handle entire directory
             add_directory_to_conversation(normalized_path)
         else:
-            # Handle a single file as before
-            # Use imported util_read_local_file
             content = util_read_local_file(normalized_path)
-            conversation_history.append({ # Add to global history
+            conversation_history.append({
                 "role": "system",
                 "content": f"Content of file '{normalized_path}':\n\n{content}"
             })
             console.print(f"[bold blue]✓[/bold blue] Added file '[bright_cyan]{normalized_path}[/bright_cyan]' to conversation.\n")
-    except ValueError as e: # Catch errors from normalize_path
+    except ValueError as e:
             console.print(f"[bold red]✗[/bold red] Could not add path '[bright_cyan]{path_to_add}[/bright_cyan]': {e}\n")
     except OSError as e:
         console.print(f"[bold red]✗[/bold red] Could not add path '[bright_cyan]{path_to_add}[/bright_cyan]': {e}\n")
-    return True # Handled (attempted to process or printed error)
-
+    return True
 
 def try_handle_set_command(user_input: str) -> bool:
-    """
-    Handles the /set command to change configuration parameters at runtime.
-    """
     command_prefix = "/set"
     stripped_input = user_input.strip()
-
-    # Strict check
     if not (stripped_input.lower() == command_prefix or stripped_input.lower().startswith(command_prefix + " ")):
         return False
-
     prefix_with_space = command_prefix + " "
     command_body = ""
     if stripped_input.lower().startswith(prefix_with_space):
         command_body = stripped_input[len(prefix_with_space):].strip()
-    # If it's just "/set" (and not "/set "), command_body remains "" and usage is printed below
-
     if not command_body:
         console.print("[yellow]Available parameters to set:[/yellow]")
         for p_name, p_config in SUPPORTED_SET_PARAMS.items():
@@ -284,84 +263,65 @@ def try_handle_set_command(user_input: str) -> bool:
         console.print("\n[yellow]Usage: /set <parameter> <value>[/yellow]")
         console.print("[yellow]  Example: /set model gpt-4o[/yellow]")
         return True
-
     command_parts = command_body.split(maxsplit=1)
     if len(command_parts) < 2:
         console.print("[yellow]Usage: /set <parameter> <value>[/yellow]")
         return True
-
     param_name, value = command_parts[0].lower(), command_parts[1]
-
     if param_name == "system_prompt":
-        file_path = value # value is the path from /set system_prompt <path>
+        file_path = value
         try:
-            # Use imported normalize_path and util_read_local_file
             normalized_path = normalize_path(file_path)
             new_prompt_content = util_read_local_file(normalized_path)
-
             if conversation_history and conversation_history[0]["role"] == "system":
                 conversation_history[0]["content"] = new_prompt_content
             else:
-                # Should not happen if history is initialized correctly, but as a fallback:
                 conversation_history.insert(0, {"role": "system", "content": new_prompt_content})
-
-            RUNTIME_OVERRIDES[param_name] = new_prompt_content # Store the actual content
+            RUNTIME_OVERRIDES[param_name] = new_prompt_content
             console.print(f"[green]✓ System prompt updated from file '[bright_cyan]{normalized_path}[/bright_cyan]'.[/green]")
         except FileNotFoundError:
             console.print(f"[red]Error: File not found at '[bright_cyan]{file_path}[/bright_cyan]'. System prompt not changed.[/red]")
-        except (OSError, ValueError) as e: # ValueError from normalize_path or read errors
+        except (OSError, ValueError) as e:
             console.print(f"[red]Error reading or normalizing file '[bright_cyan]{file_path}[/bright_cyan]': {e}. System prompt not changed.[/red]")
-        return True # Command was handled, even if there was an error
+        return True
     elif param_name in SUPPORTED_SET_PARAMS:
         param_config = SUPPORTED_SET_PARAMS[param_name]
-
         if "allowed_values" in param_config and value.lower() not in param_config["allowed_values"]:
             console.print(f"[red]Error: Invalid value '{value}' for '{param_name}'. Allowed values: {', '.join(param_config.get('allowed_values', []))}[/red]")
             return True
-
-        # Type conversion and validation based on parameter
         if param_name == "max_tokens":
             try:
                 int_value = int(value)
                 if int_value <= 0:
                     raise ValueError("max_tokens must be a positive integer.")
-                value = int_value # Store as int
+                value = int_value
             except ValueError:
                 console.print(f"[red]Error: Invalid value '{value}' for 'max_tokens'. Must be a positive integer.[/red]")
                 return True
         elif param_name == "temperature":
             try:
                 float_value = float(value)
-                if not (0.0 <= float_value <= 2.0): # Temperature is typically between 0.0 and 2.0
+                if not (0.0 <= float_value <= 2.0):
                     raise ValueError("Temperature must be a float between 0.0 and 2.0.")
-                value = float_value # Store as float
+                value = float_value
             except ValueError as e:
                 console.print(f"[red]Error: Invalid value '{value}' for 'temperature'. Must be a float between 0.0 and 2.0. Details: {e}[/red]")
                 return True
-        # For other parameters (model, api_base, reasoning_style, reasoning_effort, reply_effort),
-        # the value can be stored as a string directly.
-
-        # If we reached here, the parameter is valid and value is potentially converted/validated
         RUNTIME_OVERRIDES[param_name] = value
         console.print(f"[green]✓ Parameter '{param_name}' set to '{value}' for the current session.[/green]")
         return True
-    else: # Unknown parameter (not system_prompt and not in SUPPORTED_SET_PARAMS)
+    else:
         console.print(f"[red]Error: Unknown parameter '{param_name}'. Supported parameters: {', '.join(SUPPORTED_SET_PARAMS.keys())}[/red]")
         return True
 
 def try_handle_help_command(user_input: str) -> bool:
-    """
-    Handles the /help command to display the help markdown file.
-    """
     command_prefix = "/help"
     if user_input.strip().lower() == command_prefix:
         help_file_path = Path(__file__).parent / "ai_engineer_help.md"
         try:
-            # Ensure util_read_local_file is used if it's the standard
-            # Use imported util_read_local_file
             help_content = util_read_local_file(str(help_file_path))
             console.print(Panel(
-                RichMarkdown(help_content), # Use Rich's Markdown object
+                RichMarkdown(help_content),
                 title="[bold blue]📚 AI Engineer Help[/bold blue]",
                 title_align="left",
                 border_style="blue"
@@ -370,55 +330,36 @@ def try_handle_help_command(user_input: str) -> bool:
             console.print(f"[red]Error: Help file not found at '{help_file_path}'[/red]")
         except OSError as e:
             console.print(f"[red]Error reading help file: {e}[/red]")
-        # Help command does not add to conversation history
         return True
     return False
 
 def try_handle_shell_command(user_input: str) -> bool:
-    """
-    Handles the /shell command to execute a shell command and add output to history.
-    """
     command_prefix = "/shell"
     stripped_input = user_input.strip()
-
-    # Strict check
     if not (stripped_input.lower() == command_prefix or stripped_input.lower().startswith(command_prefix + " ")):
         return False
-
     prefix_with_space = command_prefix + " "
     command_body = ""
     if stripped_input.lower().startswith(prefix_with_space):
         command_body = stripped_input[len(prefix_with_space):].strip()
-
     if not command_body:
             console.print("[yellow]Usage: /shell <command and arguments>[/yellow]")
             console.print("[yellow]  Example: /shell ls -l[/yellow]")
             console.print("[bold yellow]⚠️ Warning: Executing arbitrary shell commands can be risky.[/bold yellow]")
             return True
-    
     console.print(f"[bold bright_blue]🐚 Executing shell command: '{command_body}'[/bold bright_blue]")
     console.print("[dim]Output:[/dim]")
-
     try:
-        # Execute the command
-        # Use shell=True for simplicity as requested, but note security risks
-        # capture_output=True captures stdout and stderr
-        # text=True decodes stdout/stderr as text
         result = subprocess.run(command_body, shell=True, capture_output=True, text=True, check=False)
-
         output = result.stdout.strip()
         error_output = result.stderr.strip()
         return_code = result.returncode
-
-        # Print output to console in real-time (or after execution for subprocess.run)
         if output:
             console.print(output)
         if error_output:
             console.print(f"[red]Stderr:[/red]\n{error_output}")
         if return_code != 0:
             console.print(f"[red]Command exited with non-zero status code: {return_code}[/red]")
-
-        # Add output to conversation history
         history_content = f"Shell command executed: '{command_body}'\n\n"
         if output:
             history_content += f"Stdout:\n```\n{output}\n```\n"
@@ -426,15 +367,12 @@ def try_handle_shell_command(user_input: str) -> bool:
             history_content += f"Stderr:\n```\n{error_output}\n```\n"
         if return_code != 0:
             history_content += f"Return Code: {return_code}\n"
-
         conversation_history.append({
             "role": "system",
             "content": history_content.strip()
         })
         console.print("[bold blue]✓[/bold blue] Shell output added to conversation history.\n")
-
     except FileNotFoundError:
-        # This happens if shell=False and the command itself is not found
         console.print(f"[red]Error: Command not found: '{command_body.split()[0]}'[/red]")
         conversation_history.append({
             "role": "system",
@@ -446,28 +384,19 @@ def try_handle_shell_command(user_input: str) -> bool:
             "role": "system",
             "content": f"Error executing shell command '{command_body}': {e}"
         })
-
     return True
-    
+
 def try_handle_rules_command(user_input: str) -> bool:
-    """
-    Handles the /rules command to list or add rules to the system prompt.
-    """
     command_prefix = "/rules"
     stripped_input = user_input.strip()
-
-    # Strict check
     if not (stripped_input.lower() == command_prefix or stripped_input.lower().startswith(command_prefix + " ")):
         return False
-
-    command_body = stripped_input[len(command_prefix):].strip() # Get part after "/rules"
+    command_body = stripped_input[len(command_prefix):].strip()
     parts = command_body.split(maxsplit=1)
     sub_command = parts[0].lower() if parts else ""
     arg = parts[1] if len(parts) > 1 else ""
-
     if sub_command == "show":
         console.print("\n[bold blue]📚 Current System Prompt (Rules):[/bold blue]")
-        # The system prompt is the first message in the history
         if conversation_history and conversation_history[0]["role"] == "system":
             console.print(Panel(
                 RichMarkdown(conversation_history[0]["content"]),
@@ -478,7 +407,6 @@ def try_handle_rules_command(user_input: str) -> bool:
         else:
             console.print("[yellow]No system prompt found in history.[/yellow]")
         return True
-
     elif sub_command == "list":
         rules_dir = Path("./.aie_rules/")
         console.print(f"\n[bold blue]📚 Rules files in '[bright_cyan]{rules_dir}[/bright_cyan]':[/bold blue]")
@@ -494,7 +422,6 @@ def try_handle_rules_command(user_input: str) -> bool:
         except Exception as e:
             console.print(f"[red]Error listing files in '[bright_cyan]{rules_dir}[/bright_cyan]': {e}[/red]")
         return True
-
     elif sub_command == "add":
         if not arg:
             console.print("[yellow]Usage: /rules add <rule-file>[/yellow]")
@@ -503,125 +430,100 @@ def try_handle_rules_command(user_input: str) -> bool:
         try:
             normalized_path = normalize_path(arg)
             rule_content = util_read_local_file(normalized_path)
-            # Append the new rules to the existing system prompt
             conversation_history[0]["content"] += f"\n\n## Additional Rules from {normalized_path}:\n\n{rule_content}"
             console.print(f"[green]✓ Added rules from '[bright_cyan]{normalized_path}[/bright_cyan]' to the system prompt for this session.[/green]")
         except (FileNotFoundError, OSError, ValueError) as e:
             console.print(f"[bold red]✗[/bold red] Could not add rules from '[bright_cyan]{arg}[/bright_cyan]': {e}[/bold red]")
         return True
-
     elif sub_command == "reset":
         if conversation_history and conversation_history[0]["role"] == "system":
-            # Reset to the imported default system_PROMPT
-            conversation_history[0]["content"] = "" # Empties the system prompt
-            # Clear any runtime override for system_prompt file path
+            conversation_history[0]["content"] = ""
             RUNTIME_OVERRIDES.pop("system_prompt", None)
             console.print("[green]✓ System prompt emptied.[/green]")
         else:
             console.print("[yellow]Warning: Could not find system prompt in history to reset.[/yellow]")
-            # Initialize if somehow missing (should not happen in normal flow)
             conversation_history.insert(0, {"role": "system", "content": system_PROMPT})
-
         default_rules_dir = Path("./.aie_rules/")
         default_rules_file_name = "_default.md"
         default_rules_path = default_rules_dir / default_rules_file_name
         default_rules_path_str = str(default_rules_path)
-
         confirmation = prompt_session.prompt(
             f"Load default rules from '[bright_cyan]{default_rules_path_str}[/bright_cyan]'? [Y/n]: ",
             default="y"
         ).strip().lower()
-
         if confirmation in ["y", "yes", ""]:
             try:
-                normalized_path = normalize_path(default_rules_path_str) # Normalizes and checks existence implicitly via read
-                rule_content = util_read_local_file(normalized_path)
-                conversation_history[0]["content"] += f"\n\n## Additional Rules from {normalized_path}:\n\n{rule_content}"
-                console.print(f"[green]✓ Added default rules from '[bright_cyan]{normalized_path}[/bright_cyan]' to the system prompt.[/green]")
-            except FileNotFoundError:
-                console.print(f"[yellow]⚠ Default rules file '[bright_cyan]{normalized_path if 'normalized_path' in locals() else default_rules_path_str}[/bright_cyan]' not found. No default rules loaded.[/yellow]")
-            except (OSError, ValueError) as e: # ValueError from normalize_path or read errors
+                normalized_path_str_val = "" # Initialize to handle potential NameError
+                try:
+                    normalized_path_str_val = normalize_path(default_rules_path_str)
+                    rule_content = util_read_local_file(normalized_path_str_val)
+                    conversation_history[0]["content"] += f"\n\n## Additional Rules from {normalized_path_str_val}:\n\n{rule_content}"
+                    console.print(f"[green]✓ Added default rules from '[bright_cyan]{normalized_path_str_val}[/bright_cyan]' to the system prompt.[/green]")
+                except FileNotFoundError:
+                    console.print(f"[yellow]⚠ Default rules file '[bright_cyan]{normalized_path_str_val or default_rules_path_str}[/bright_cyan]' not found. No default rules loaded.[/yellow]")
+            except (OSError, ValueError) as e:
                 console.print(f"[bold red]✗[/bold red] Could not load default rules from '[bright_cyan]{default_rules_path_str}[/bright_cyan]': {e}[/bold red]")
         else:
             console.print("[yellow]ℹ️ Default rules not loaded.[/yellow]")
         return True
-    else: # Handles empty sub_command (just "/rules") or unknown sub_command
+    else:
         console.print("[yellow]Usage: /rules <show|list|add|reset> [arguments][/yellow]")
         console.print("[yellow]  show                - Display the current system prompt (rules).[/yellow]")
         console.print("[yellow]  list                - List available rule files in ./.aie_rules/.[/yellow]")
         console.print("[yellow]  add <rule-file>     - Add rules from a file to the system prompt.[/yellow]")
         console.print("[yellow]  reset               - Reset system prompt to default, optionally load ./.aie_rules/_default.md.[/yellow]")
-        return True # Handled (printed usage or processed subcommand)
+        return True
 
 def try_handle_context_command(user_input: str) -> bool:
-    """
-    Handles /context commands (save, load, list, summarize).
-    """
     command_prefix = "/context"
     stripped_input = user_input.strip()
-
-    # Strict check
     if not (stripped_input.lower() == command_prefix or stripped_input.lower().startswith(command_prefix + " ")):
         return False
-
     prefix_with_space = command_prefix + " "
     command_body = ""
     if stripped_input.lower().startswith(prefix_with_space):
         command_body = stripped_input[len(prefix_with_space):].strip()
-    elif stripped_input.lower() == command_prefix: # Just "/context"
+    elif stripped_input.lower() == command_prefix:
         command_body = ""
-
     parts = command_body.split(maxsplit=1)
     sub_command = parts[0].lower() if parts else ""
     arg = parts[1] if len(parts) > 1 else ""
-
     if sub_command == "save":
         if not arg:
             console.print("[yellow]Usage: /context save <name>[/yellow]")
             return True
         save_context(arg)
         return True
-
     elif sub_command == "load":
         if not arg:
             console.print("[yellow]Usage: /context load <name>[/yellow]")
             return True
         load_context(arg)
         return True
-
     elif sub_command == "list":
-        list_contexts(arg if arg else ".") # List in current dir if no path given
+        list_contexts(arg if arg else ".")
         return True
-
     elif sub_command == "summarize":
         summarize_context()
         return True
-
-    else: # Handles empty sub_command (just "/context") or unknown sub_command
+    else:
         console.print("[yellow]Usage: /context <save|load|list|summarize> [name/path][/yellow]")
         console.print("[yellow]  save <name>     - Save current context to a file.[/yellow]")
         console.print("[yellow]  load <name>     - Load context from a file.[/yellow]")
         console.print("[yellow]  list [path]     - List saved contexts in a directory.[/yellow]")
         console.print("[yellow]  summarize       - Summarize current context using the LLM.[/yellow]")
-        return True # Handled (printed usage or processed subcommand)
+        return True
 
 def try_handle_session_command(user_input: str) -> bool:
-    """Handles /session commands by delegating to the /context command handler."""
     stripped_input = user_input.strip()
     if stripped_input.lower().startswith("/session"):
-        # Construct the equivalent /context command
-        # /session -> /context
-        # /session foo -> /context foo
-        # len("/session") is 8
-        arguments_part = stripped_input[len("/session"):] # Takes arguments after "/session" (e.g., " save foo" or "")
+        arguments_part = stripped_input[len("/session"):]
         context_equivalent_input = "/context" + arguments_part
-        
         console.print(f"[dim]Executing '{stripped_input}' as '{context_equivalent_input.strip()}'[/dim]")
         return try_handle_context_command(context_equivalent_input)
     return False
 
 def save_context(name: str):
-    """Saves the current conversation history to a JSON file."""
     file_name = f"context_{name}.json"
     try:
         with open(file_name, "w", encoding="utf-8") as f:
@@ -631,21 +533,15 @@ def save_context(name: str):
         console.print(f"[bold red]✗[/bold red] Failed to save context to '{file_name}': {e}\n")
 
 def load_context(name: str):
-    """Loads conversation history from a JSON file."""
     file_name = f"context_{name}.json"
     try:
         with open(file_name, "r", encoding="utf-8") as f:
             loaded_history = json.load(f)
-
-        # Validate loaded history structure (basic check)
         if not isinstance(loaded_history, list) or not all(isinstance(msg, dict) and "role" in msg for msg in loaded_history):
              raise ValueError("Invalid context file format.")
-
-        # Keep the initial system prompt, replace the rest
         global conversation_history
         initial_system_prompt = conversation_history[0] if conversation_history and conversation_history[0]["role"] == "system" else {"role": "system", "content": system_PROMPT}
         conversation_history = [initial_system_prompt] + [msg for msg in loaded_history if msg["role"] != "system"]
-
         console.print(f"[bold blue]✓[/bold blue] Context loaded from '[bright_cyan]{file_name}[/bright_cyan]'\n")
     except FileNotFoundError:
         console.print(f"[bold red]✗[/bold red] Context file not found: '[bright_cyan]{file_name}[/bright_cyan]'\n")
@@ -657,75 +553,51 @@ def load_context(name: str):
         console.print(f"[bold red]✗[/bold red] Failed to load context from '{file_name}': {e}\n")
 
 def list_contexts(path: str):
-    """Lists potential context files in the specified directory."""
     try:
-        # Use imported normalize_path
         normalized_path_str = normalize_path(path)
         target_dir = Path(normalized_path_str)
-
         if not target_dir.is_dir():
             console.print(f"[bold red]✗[/bold red] Path is not a directory: '[bright_cyan]{path}[/bright_cyan]'\n")
             return
-
         console.print(f"[bold bright_blue]📚 Saved Contexts in '[bright_cyan]{target_dir}[/bright_cyan]':[/bold bright_blue]")
         found_files = list(target_dir.glob("context_*.json"))
-
         if not found_files:
             console.print("  [dim]No context files found.[/dim]\n")
             return
-
         for f in found_files:
             console.print(f"  [bright_cyan]{f.name}[/bright_cyan]")
-        console.print() # Final newline
-
-    except ValueError as e: # From normalize_path
+        console.print()
+    except ValueError as e:
         console.print(f"[bold red]✗[/bold red] Invalid path '[bright_cyan]{path}[/bright_cyan]': {e}\n")
     except Exception as e:
         console.print(f"[bold red]✗[/bold red] Failed to list contexts in '{path}': {e}\n")
 
 def summarize_context():
-    """Summarizes the current conversation history using the LLM and replaces the history."""
     global conversation_history
-
-    if len(conversation_history) <= 1: # Only system prompt
+    if len(conversation_history) <= 1:
         console.print("[yellow]No conversation history to summarize.[/yellow]\n")
         return
-
     console.print("[bold bright_blue]✨ Summarizing conversation history...[/bold bright_blue]")
-
-    # Create a temporary history for the summary request
-    # Keep the original system prompt, add a user message asking for summary
     summary_messages = [
-        conversation_history[0], # Original system prompt
+        conversation_history[0],
         {"role": "user", "content": "Please provide a concise summary of our conversation so far. Focus on the key topics discussed, decisions made, and actions taken (like file operations). This summary will replace the detailed history."}
     ]
-
-    # Add the rest of the history for the LLM to read
     summary_messages.extend(conversation_history[1:])
-
     try:
-        # Use imported get_config_value for model/api_base
-        model_name = get_config_value("model", "gpt-4o") # Use a capable model for summary
+        model_name = get_config_value("model", "gpt-4o")
         api_base_url = get_config_value("api_base", None)
-
-        # Call LLM for summary (non-streaming for simplicity here)
-        # Use a lower temperature for a more focused summary
         response = completion(
             model=model_name,
             messages=summary_messages,
             temperature=0.3,
-            max_tokens=1024, # Limit summary length
+            max_tokens=1024,
             api_base=api_base_url,
-            stream=False # Don't stream the summary response
+            stream=False
         )
-
         summary_content = response.choices[0].message.content
-
         if summary_content:
             console.print("\n[bold blue]Summary:[/bold blue]")
             console.print(Panel(summary_content, border_style="blue"))
-
-            # Replace history with system prompt + summary
             initial_system_prompt = conversation_history[0] if conversation_history and conversation_history[0]["role"] == "system" else {"role": "system", "content": system_PROMPT}
             conversation_history = [
                 initial_system_prompt,
@@ -734,15 +606,11 @@ def summarize_context():
             console.print("[bold blue]✓[/bold blue] Conversation history replaced with summary.\n")
         else:
             console.print("[yellow]LLM returned an empty summary.[/yellow]\n")
-
     except Exception as e:
         console.print(f"[bold red]✗[/bold red] Failed to summarize context: {e}\n")
-        # History remains unchanged on error
 
 def _call_llm_for_prompt_generation(user_text: str, mode: str) -> str:
-    """Helper function to call LLM for refining or detailing a prompt."""
     console.print(f"[bold bright_blue]⚙️ Processing text for prompt {mode}ing...[/bold bright_blue]")
-
     if mode == "refine":
         meta_system_prompt = dedent("""\
             You are a prompt engineering assistant. Your task is to refine the following user-provided text into an optimized prompt suitable for an AI coding assistant like AI Engineer. The refined prompt should be clear, concise, and actionable, guiding the AI to provide the best possible coding assistance.
@@ -757,24 +625,21 @@ def _call_llm_for_prompt_generation(user_text: str, mode: str) -> str:
         user_query = f"Expand this text into a detailed prompt for an AI coding assistant:\n\n---\n{user_text}\n---"
     else:
         return "Error: Invalid mode for prompt generation."
-
     messages = [
         {"role": "system", "content": meta_system_prompt},
         {"role": "user", "content": user_query}
     ]
-
     try:
-        model_name = get_config_value("model", "gpt-4o") # Use a capable model
+        model_name = get_config_value("model", "gpt-4o")
         api_base_url = get_config_value("api_base", None)
-        max_tokens_val = get_config_value("max_tokens", 2048) # Allow decent length
-
+        max_tokens_val = get_config_value("max_tokens", 2048)
         response = completion(
             model=model_name,
             messages=messages,
-            temperature=0.5, # Balanced temperature
+            temperature=0.5,
             max_tokens=max_tokens_val,
             api_base=api_base_url,
-            stream=False # Non-streaming for this helper
+            stream=False
         )
         generated_prompt = response.choices[0].message.content.strip()
         return generated_prompt
@@ -783,22 +648,17 @@ def _call_llm_for_prompt_generation(user_text: str, mode: str) -> str:
         return ""
 
 def try_handle_prompt_command(user_input: str) -> bool:
-    """Handles /prompt <refine|detail> <text> commands."""
     prefix = "/prompt "
     command_name_lower = "/prompt"
     stripped_input = user_input.strip()
-
-    # Strict check
     if not (stripped_input.lower() == command_name_lower or stripped_input.lower().startswith(prefix)):
         return False
-
     command_body = ""
-    if stripped_input.lower().startswith(prefix): # Check for "/prompt "
+    if stripped_input.lower().startswith(prefix):
         command_body = stripped_input[len(prefix):].strip()
     parts = command_body.split(maxsplit=1)
     sub_command = parts[0].lower() if parts else ""
     text_to_process = parts[1] if len(parts) > 1 else ""
-
     if sub_command in ["refine", "detail"]:
         if not text_to_process:
             console.print(f"[yellow]Usage: /prompt {sub_command} <text_to_{sub_command}>[/yellow]")
@@ -811,90 +671,64 @@ def try_handle_prompt_command(user_input: str) -> bool:
     console.print("[yellow]Usage: /prompt <refine|detail> <text>[/yellow]")
     console.print("[yellow]  refine <text>  - Optimizes <text> into a clearer and more effective prompt for AI Engineer.[/yellow]")
     console.print("[yellow]  detail <text>  - Expands <text> into a more comprehensive and detailed prompt for AI Engineer.[/yellow]")
-    return True # Handled (printed usage or processed subcommand)
+    return True
 
 def add_directory_to_conversation(directory_path: str):
     with console.status("[bold bright_blue]🔍 Scanning directory...[/bold bright_blue]") as status:
         excluded_files = {
-            # Python specific
             ".DS_Store", "Thumbs.db", ".gitignore", ".python-version",
             "uv.lock", ".uv", "uvenv", ".uvenv", ".venv", "venv",
             "__pycache__", ".pytest_cache", ".coverage", ".mypy_cache",
-            # Node.js / Web specific
             "node_modules", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
             ".next", ".nuxt", "dist", "build", ".cache", ".parcel-cache",
             ".turbo", ".vercel", ".output", ".contentlayer",
-            # Build outputs
             "out", "coverage", ".nyc_output", "storybook-static",
-            # Environment and config
             ".env", ".env.local", ".env.development", ".env.production",
-            # Misc
             ".git", ".svn", ".hg", "CVS"
         }
         excluded_extensions = {
-            # Binary and media files
             ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".webp", ".avif",
             ".mp4", ".webm", ".mov", ".mp3", ".wav", ".ogg",
             ".zip", ".tar", ".gz", ".7z", ".rar",
             ".exe", ".dll", ".so", ".dylib", ".bin",
-            # Documents
             ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-            # Python specific
             ".pyc", ".pyo", ".pyd", ".egg", ".whl",
-            # UV specific
             ".uv", ".uvenv",
-            # Database and logs
             ".db", ".sqlite", ".sqlite3", ".log",
-            # IDE specific
             ".idea", ".vscode",
-            # Web specific
             ".map", ".chunk.js", ".chunk.css",
             ".min.js", ".min.css", ".bundle.js", ".bundle.css",
-            # Cache and temp files
             ".cache", ".tmp", ".temp",
-            # Font files
             ".ttf", ".otf", ".woff", ".woff2", ".eot"
         }
         skipped_files = []
         added_files = []
         total_files_processed = 0
-
-        for root, dirs, files in os.walk(directory_path): # Use imported MAX_FILES_TO_PROCESS_IN_DIR
+        for root, dirs, files in os.walk(directory_path):
             if total_files_processed >= MAX_FILES_TO_PROCESS_IN_DIR:
                 console.print(f"[bold yellow]⚠[/bold yellow] Reached maximum file limit ({MAX_FILES_TO_PROCESS_IN_DIR})")
                 break
-
             status.update(f"[bold bright_blue]🔍 Scanning {root}...[/bold bright_blue]")
-            # Skip hidden directories and excluded directories
             dirs[:] = [d for d in dirs if not d.startswith('.') and d not in excluded_files]
-
-            for file in files: # Use imported MAX_FILES_TO_PROCESS_IN_DIR
+            for file in files:
                 if total_files_processed >= MAX_FILES_TO_PROCESS_IN_DIR:
                     break
-
                 if file.startswith('.') or file in excluded_files:
-                    skipped_files.append(str(Path(root) / file)) # Use Path for consistency
+                    skipped_files.append(str(Path(root) / file))
                     continue
-
                 _, ext = os.path.splitext(file)
                 if ext.lower() in excluded_extensions:
                     skipped_files.append(os.path.join(root, file))
                     continue
-
-                full_path = str(Path(root) / file) # Use Path for consistency
-
+                full_path = str(Path(root) / file)
                 try:
-                    # Check file size before processing
                     if os.path.getsize(full_path) > MAX_FILE_SIZE_BYTES:
                         skipped_files.append(f"{full_path} (exceeds size limit)")
                         continue
                     if is_binary_file(full_path):
                         skipped_files.append(full_path)
                         continue
-
-                    # Use imported normalize_path
                     normalized_path = normalize_path(full_path)
-                    # Use imported util_read_local_file
                     content = util_read_local_file(normalized_path)
                     conversation_history.append({
                         "role": "system",
@@ -902,217 +736,150 @@ def add_directory_to_conversation(directory_path: str):
                     })
                     added_files.append(normalized_path)
                     total_files_processed += 1
-
-                except OSError: # Catch read errors
-                    skipped_files.append(str(full_path)) # Ensure it's a string
-                except ValueError as e: # Catch errors from normalize_path
+                except OSError:
+                    skipped_files.append(str(full_path))
+                except ValueError as e:
                      skipped_files.append(f"{full_path} (Invalid path: {e})")
-
-
         console.print(f"[bold blue]✓[/bold blue] Added folder '[bright_cyan]{directory_path}[/bright_cyan]' to conversation.")
         if added_files:
             console.print(f"\n[bold bright_blue]📁 Added files:[/bold bright_blue] [dim]({len(added_files)} of {total_files_processed})[/dim]")
-            for f in added_files:
-                console.print(f"  [bright_cyan]📄 {f}[/bright_cyan]")
+            for f_path in added_files:
+                console.print(f"  [bright_cyan]📄 {f_path}[/bright_cyan]")
         if skipped_files:
             console.print(f"\n[bold yellow]⏭ Skipped files:[/bold yellow] [dim]({len(skipped_files)})[/dim]")
-            for f in skipped_files[:10]:  # Show only first 10 to avoid clutter
-                console.print(f"  [yellow dim]⚠ {f}[/yellow dim]")
+            for f_path in skipped_files[:10]:
+                console.print(f"  [yellow dim]⚠ {f_path}[/yellow dim]")
             if len(skipped_files) > 10:
                 console.print(f"  [dim]... and {len(skipped_files) - 10} more[/dim]")
-        console.print() # Final newline after directory scan summary
+        console.print()
 
 def ensure_file_in_context(file_path: str) -> bool:
     try:
-        # Use imported normalize_path
         normalized_path = normalize_path(file_path)
-        # Use imported util_read_local_file
         content = util_read_local_file(normalized_path)
         file_marker = f"Content of file '{normalized_path}'"
-        # Check if the file content is already in the history (by looking for the marker)
-        # Also ensure the message has a 'content' key before checking
         if not any(file_marker in msg["content"] for msg in conversation_history if msg.get("content")):
             conversation_history.append({
                 "role": "system",
                 "content": f"{file_marker}:\n\n{content}"
             })
         return True
-    except (OSError, ValueError) as e: # Catch OSError from read or ValueError from normalize
+    except (OSError, ValueError) as e:
         console.print(f"[bold red]✗[/bold red] Could not read file '[bright_cyan]{file_path}[/bright_cyan]' for editing context: {e}")
         return False
 
 # --------------------------------------------------------------------------------
 # 5. Conversation state
 # --------------------------------------------------------------------------------
-# system_PROMPT is now imported
 conversation_history = [
     {"role": "system", "content": system_PROMPT}
 ]
-
 
 # --------------------------------------------------------------------------------
 # 6. LLM API interaction with streaming
 # --------------------------------------------------------------------------------
 
-
 def execute_function_call_dict(tool_call_dict) -> str:
-    """Execute a function call from a dictionary format and return the result as a string."""
-    function_name = "unknown_function" # Default if parsing fails early
+    function_name = "unknown_function"
     try:
         function_name = tool_call_dict["function"]["name"]
         arguments = json.loads(tool_call_dict["function"]["arguments"])
-
         if function_name == "read_file":
             file_path = arguments["file_path"]
             normalized_path = normalize_path(file_path)
             content = util_read_local_file(normalized_path)
             return f"Content of file '{normalized_path}':\n\n{content}"
-
         elif function_name == "read_multiple_files":
             file_paths = arguments["file_paths"]
             results = []
-            # Use imported normalize_path and util_read_local_file
             for file_path in file_paths:
                 try:
                     normalized_path = normalize_path(file_path)
                     content = util_read_local_file(normalized_path)
                     results.append(f"Content of file '{normalized_path}':\n\n{content}")
-                except (OSError, ValueError) as e: # Catch read errors or normalize errors
+                except (OSError, ValueError) as e:
                     results.append(f"Error reading '{file_path}': {e}")
             return "\n\n" + "="*50 + "\n\n".join(results)
-
         elif function_name == "create_file":
             file_path = arguments["file_path"]
             content = arguments["content"]
             util_create_file(file_path, content, console, MAX_FILE_SIZE_BYTES)
             return f"Successfully created file '{file_path}'"
-
         elif function_name == "create_multiple_files":
             files_to_create_data = arguments.get("files", [])
             successful_paths = []
-            success_messages_for_result = [] # For "File ... created." part in return
+            success_messages_for_result = []
             first_error_detail_for_return = None
-
             for file_info_data in files_to_create_data:
                 path = file_info_data.get("path", "unknown_path")
                 content = file_info_data.get("content", "")
                 try:
-                    # In the test TestHelperFunctions.test_execute_function_call_dict,
-                    # de.create_file is mocked (as mock_create).
-                    # The test mocks the imported util_create_file.
-                    # Call the imported function directly.
                     util_create_file(path, content, console, MAX_FILE_SIZE_BYTES)
                     successful_paths.append(path)
                     success_messages_for_result.append(f"File {path} created.")
                 except Exception as e_create:
-                    # This console print is asserted by the test for the failing file.
                     console.print(f"[red]Error creating file {path}: {str(e_create)}[/red]")
                     if not first_error_detail_for_return:
                         first_error_detail_for_return = f"Error during create_multiple_files: {str(e_create)}"
-                    # Test implies processing continues for other files if any.
-
             if first_error_detail_for_return:
                 return "\n".join(success_messages_for_result) + "\n" + first_error_detail_for_return if success_messages_for_result else first_error_detail_for_return
-
             return f"Successfully created {len(successful_paths)} files: {', '.join(successful_paths)}"
-
         elif function_name == "edit_file":
             file_path = arguments["file_path"]
             original_snippet = arguments["original_snippet"]
             new_snippet = arguments["new_snippet"]
-
-            # Ensure file is in context first
             if not ensure_file_in_context(file_path):
                 return f"Error: Could not read file '{file_path}' for editing"
-
             util_apply_diff_edit(file_path, original_snippet, new_snippet, console, MAX_FILE_SIZE_BYTES)
             return f"Successfully edited file '{file_path}'"
-
         elif function_name == "connect_local_mcp_stream":
             endpoint_url = arguments["endpoint_url"]
-            timeout_seconds = arguments.get("timeout_seconds", 30) # Default from schema
-            max_data_chars = arguments.get("max_data_chars", 10000) # Default from schema
-
-            # Basic validation before calling the handler, complementing handler's own validation
+            timeout_seconds = arguments.get("timeout_seconds", 30)
+            max_data_chars = arguments.get("max_data_chars", 10000)
             try:
                 parsed_url = httpx.URL(endpoint_url)
                 if not (parsed_url.host.lower() in ("localhost", "127.0.0.1") and parsed_url.scheme.lower() in ("http", "https")):
                      return f"Error: For connect_local_mcp_stream, endpoint_url must be for localhost (http or https). Provided: {endpoint_url}"
             except Exception as e_val:
                 return f"Error validating local MCP stream URL '{endpoint_url}' before execution: {str(e_val)}"
-
             return _handle_local_mcp_stream(endpoint_url, timeout_seconds, max_data_chars)
-
         elif function_name == "connect_remote_mcp_sse":
             endpoint_url = arguments["endpoint_url"]
-            max_events = arguments.get("max_events", 10) # Default from schema
-            listen_timeout_seconds = arguments.get("listen_timeout_seconds", 60) # Default from schema
-
-            # Basic validation before calling the handler
+            max_events = arguments.get("max_events", 10)
+            listen_timeout_seconds = arguments.get("listen_timeout_seconds", 60)
             try:
                 parsed_url = httpx.URL(endpoint_url)
-                if parsed_url.scheme.lower() not in ("http", "https"): # Allow http and https
+                if parsed_url.scheme.lower() not in ("http", "https"):
                     return f"Error: For connect_remote_mcp_sse, endpoint_url must be a valid HTTP/HTTPS URL. Provided: {endpoint_url}"
             except Exception as e_val:
                 return f"Error validating remote MCP SSE URL '{endpoint_url}' before execution: {str(e_val)}"
-
             return _handle_remote_mcp_sse(endpoint_url, max_events, listen_timeout_seconds)
-
-
         else:
             return f"Unknown function: {function_name}"
-
     except Exception as e:
-        # This block handles errors from json.loads or any of the specific tool functions
         error_message = f"Error executing {function_name}: {str(e)}"
-        console.print(f"[red]{error_message}[/red]") # Print the error to console
-        return error_message # Return the error message string
-
+        console.print(f"[red]{error_message}[/red]")
+        return error_message
 
 def trim_conversation_history():
-    """Trim conversation history to prevent token limit issues while preserving tool call sequences"""
-    if len(conversation_history) <= 20:  # Don't trim if conversation is still small
+    if len(conversation_history) <= 20:
         return
-
-    # Always keep the system prompt
     system_msgs = [msg for msg in conversation_history if msg["role"] == "system"]
     other_msgs = [msg for msg in conversation_history if msg["role"] != "system"]
-
-    # Keep only the last 15 messages to prevent token overflow
     if len(other_msgs) > 15:
         other_msgs = other_msgs[-15:]
-
-    # Rebuild conversation history
     conversation_history.clear()
     conversation_history.extend(system_msgs + other_msgs)
 
-
 def stream_llm_response(user_message: str):
-    """
-    Sends the conversation to the LLM using litellm and streams the response.
-    Handles regular text responses, reasoning steps, and tool calls.
-    """
-    # Get configuration settings first, including reasoning_effort
     trim_conversation_history()
-
     try:
-        # Create a deep copy of the conversation history *before* this turn's user message.
-        # The user_message for this turn will be added to this copy, potentially augmented.
         messages_for_api_call = copy.deepcopy(conversation_history)
-
-        # Default values for settings if not overridden by env or runtime
-        # These are used as the final fallback if no other configuration is found.
-        # For most, we use the DEFAULT_... constants defined at the top of this file.
-        default_reply_effort_val = "medium" # No global constant for this one yet
-        default_temperature_val = 0.7 # Common default for temperature
-
-        # Removed local get_config_value definition.
-        # Use the imported get_config_value function.
-        # Use imported constants for defaults where applicable
+        default_reply_effort_val = "medium"
+        default_temperature_val = 0.7
         model_name = get_config_value("model", DEFAULT_LITELLM_MODEL)
         api_base_url = get_config_value("api_base", DEFAULT_LITELLM_API_BASE)
         reasoning_style = str(get_config_value("reasoning_style", DEFAULT_REASONING_STYLE)).lower()
-
         max_tokens_raw = get_config_value("max_tokens", DEFAULT_LITELLM_MAX_TOKENS)
         try:
             max_tokens = int(max_tokens_raw)
@@ -1120,21 +887,14 @@ def stream_llm_response(user_message: str):
                 max_tokens = DEFAULT_LITELLM_MAX_TOKENS
         except (ValueError, TypeError):
             max_tokens = DEFAULT_LITELLM_MAX_TOKENS
-
         temperature_raw = get_config_value("temperature", default_temperature_val)
         try:
             temperature = float(temperature_raw)
-            # Optional: Add range validation here if desired, e.g., if not (0.0 <= temperature <= 2.0):
         except (ValueError, TypeError):
             console.print(f"[yellow]Warning: Invalid temperature value '{temperature_raw}'. Using default {default_temperature_val}.[/yellow]")
             temperature = default_temperature_val
-
         reasoning_effort_setting = str(get_config_value("reasoning_effort", DEFAULT_REASONING_EFFORT)).lower()
         reply_effort_setting = str(get_config_value("reply_effort", default_reply_effort_val)).lower()
-
-        # Prepare the user's message for this turn, augmenting it with effort control instructions.
-        # The system prompt (in messages_for_api_call[0]) already defines *what* these settings mean.
-        # Here, we provide the *current values* for this specific turn.
         effort_instructions = (
             f"\n\n[System Instructions For This Turn Only]:\n"
             f"- Current `reasoning_effort`: {reasoning_effort_setting}\n"
@@ -1142,39 +902,28 @@ def stream_llm_response(user_message: str):
             f"Please adhere to these specific effort levels for your reasoning and reply in this turn."
         )
         augmented_user_message_content = user_message + effort_instructions
-
         messages_for_api_call.append({
             "role": "user",
             "content": augmented_user_message_content
         })
-
         console.print("\n[bold bright_blue]🐋 Seeking...[/bold bright_blue]")
-        reasoning_content_accumulated = "" # To store full reasoning if needed later
+        reasoning_content_accumulated = ""
         final_content = ""
         tool_calls = []
-
-        # Determine if we should print the "Reasoning:" header at all
-        # For "silent", we don't print it. For "compact", we print it once. For "full", we print it once.
-        reasoning_started_printed = False # Track if "💭 Reasoning:" has been printed
-
-
-        # API call using litellm
+        reasoning_started_printed = False
         stream = completion(
             model=model_name,
-            messages=messages_for_api_call, # Use the augmented messages
-            tools=tools, 
-            max_tokens=max_tokens, 
+            messages=messages_for_api_call,
+            tools=tools,
+            max_tokens=max_tokens,
             api_base=api_base_url,
             temperature=temperature,
             stream=True
         )
-
         for chunk in stream:
-            # Handle reasoning content if available
             if hasattr(chunk.choices[0].delta, 'reasoning_content') and chunk.choices[0].delta.reasoning_content:
                 reasoning_chunk_content = chunk.choices[0].delta.reasoning_content
                 reasoning_content_accumulated += reasoning_chunk_content
-
                 if reasoning_style == "full":
                     if not reasoning_started_printed:
                         console.print("\n[bold blue]💭 Reasoning:[/bold blue]")
@@ -1182,38 +931,29 @@ def stream_llm_response(user_message: str):
                     console.print(reasoning_chunk_content, end="")
                 elif reasoning_style == "compact":
                     if not reasoning_started_printed:
-                        console.print("\n[bold blue]💭 Reasoning...[/bold blue]", end="") # Print header once
+                        console.print("\n[bold blue]💭 Reasoning...[/bold blue]", end="")
                         reasoning_started_printed = True
-                    console.print(".", end="") # Print a dot for progress
-                # If style is "silent", do nothing here for reasoning_content
-
+                    console.print(".", end="")
             elif chunk.choices[0].delta.content:
-                if reasoning_started_printed and reasoning_style != "full": # Add newline if dots or compact header was printed
-                    console.print() # Newline after dots or compact header before assistant content
-                    reasoning_started_printed = False # Reset for next potential reasoning block in follow-up
-
-                if not final_content: # First content chunk
-                    console.print("\n\n[bold bright_blue]🤖 Assistant>[/bold bright_blue] ", end="")
-
-                final_content += chunk.choices[0].delta.content
-                console.print(chunk.choices[0].delta.content, end="")
-
-            elif chunk.choices[0].delta.tool_calls:
-                if reasoning_started_printed and reasoning_style != "full": # Newline if dots were printed
+                if reasoning_started_printed and reasoning_style != "full":
                     console.print()
                     reasoning_started_printed = False
-
-                # Handle tool calls
+                if not final_content:
+                    console.print("\n\n[bold bright_blue]🤖 Assistant>[/bold bright_blue] ", end="")
+                final_content += chunk.choices[0].delta.content
+                console.print(chunk.choices[0].delta.content, end="")
+            elif chunk.choices[0].delta.tool_calls:
+                if reasoning_started_printed and reasoning_style != "full":
+                    console.print()
+                    reasoning_started_printed = False
                 for tool_call_delta in chunk.choices[0].delta.tool_calls:
                     if tool_call_delta.index is not None:
-                        # Ensure we have enough tool_calls
                         while len(tool_calls) <= tool_call_delta.index:
                             tool_calls.append({
                                 "id": "",
                                 "type": "function",
                                 "function": {"name": "", "arguments": ""}
                             })
-
                         if tool_call_delta.id:
                             tool_calls[tool_call_delta.index]["id"] = tool_call_delta.id
                         if tool_call_delta.function:
@@ -1221,34 +961,21 @@ def stream_llm_response(user_message: str):
                                 tool_calls[tool_call_delta.index]["function"]["name"] += tool_call_delta.function.name
                             if tool_call_delta.function.arguments:
                                 tool_calls[tool_call_delta.index]["function"]["arguments"] += tool_call_delta.function.arguments
-
         if reasoning_started_printed and reasoning_style == "compact" and not final_content and not tool_calls:
-            # If only reasoning dots were printed and no content/tool_calls followed, add a newline.
             console.print()
-
-        console.print()  # New line after streaming is complete
-
-        # Add the original (non-augmented) user message to the global conversation history
+        console.print()
         conversation_history.append({"role": "user", "content": user_message})
-
-        # Store the assistant's response in conversation history
         assistant_message = {
             "role": "assistant",
-            "content": final_content if final_content else None # Ensure None if empty
+            "content": final_content if final_content else None
         }
-        # Add reasoning_content to the assistant message if it was captured (for full history, not for display)
-        # This is useful if we ever want to inspect the full reasoning later, regardless of display style.
         if reasoning_content_accumulated:
-            assistant_message["reasoning_content_full"] = reasoning_content_accumulated # Store under a different key
-
+            assistant_message["reasoning_content_full"] = reasoning_content_accumulated
         if tool_calls:
-            # Convert our tool_calls format to the expected format
             formatted_tool_calls = []
             for i, tc in enumerate(tool_calls):
-                if tc["function"]["name"]:  # Only add if we have a function name
-                    # Ensure we have a valid tool call ID
+                if tc["function"]["name"]:
                     tool_id = tc["id"] if tc["id"] else f"call_{i}_{int(time.time() * 1000)}"
-
                     formatted_tool_calls.append({
                         "id": tool_id,
                         "type": "function",
@@ -1257,24 +984,16 @@ def stream_llm_response(user_message: str):
                             "arguments": tc["function"]["arguments"]
                         }
                     })
-
             if formatted_tool_calls:
-                # Important: When there are tool calls, content should be None or empty
-                if not final_content: # If there was no regular content, set it to None
+                if not final_content:
                     assistant_message["content"] = None
-
                 assistant_message["tool_calls"] = formatted_tool_calls
                 conversation_history.append(assistant_message)
-
-                # Execute tool calls and add results immediately
                 console.print(f"\n[bold bright_cyan]⚡ Executing {len(formatted_tool_calls)} function call(s)...[/bold bright_cyan]")
-
-                executed_tool_call_ids_and_results = [] # To store results for history
-
+                executed_tool_call_ids_and_results = []
                 for tool_call in formatted_tool_calls:
                     tool_name = tool_call['function']['name']
                     console.print(f"[bright_blue]→ {tool_name}[/bright_blue]")
-
                     user_confirmed_or_not_risky = True
                     if tool_name in RISKY_TOOLS:
                         console.print(f"[bold yellow]⚠️ This is a risky operation: {tool_name}[/bold yellow]")
@@ -1287,8 +1006,7 @@ def stream_llm_response(user_message: str):
                                 "tool_call_id": tool_call["id"],
                                 "content": f"Error: Could not parse arguments for {tool_name}"
                             })
-                            continue 
-
+                            continue
                         if tool_name == "create_file":
                             console.print(f"   Action: Create/overwrite file '{args.get('file_path')}'")
                             content_summary = args.get('content', '')[:100] + "..." if len(args.get('content', '')) > 100 else args.get('content', '')
@@ -1310,46 +1028,36 @@ def stream_llm_response(user_message: str):
                             console.print(diff_table)
                         elif tool_name == "connect_remote_mcp_sse":
                             console.print(f"   Action: Connect to remote SSE endpoint '{args.get('endpoint_url')}'")
-
                         confirmation = prompt_session.prompt("Proceed with this operation? [Y/n]: ", default="y").strip().lower()
                         if confirmation not in ["y", "yes", ""]:
                             user_confirmed_or_not_risky = False
                             console.print("[yellow]ℹ️ Operation cancelled by user.[/yellow]")
-                            result = "User cancelled execution of this tool call." 
-                        
+                            result = "User cancelled execution of this tool call."
                     if user_confirmed_or_not_risky:
                         try:
-                            result = execute_function_call_dict(tool_call) 
-                            if isinstance(result, str) and result.lower().startswith("error:"):
-                                pass 
+                            result = execute_function_call_dict(tool_call)
                         except Exception as e_exec:
                             console.print(f"[red]Unexpected error during tool execution: {str(e_exec)}[/red]")
                             result = f"Error: Unexpected error during tool execution: {str(e_exec)}"
-
                     executed_tool_call_ids_and_results.append({
                         "role": "tool",
                         "tool_call_id": tool_call["id"],
                         "content": result
                     })
-
                 for tool_res in executed_tool_call_ids_and_results:
                     conversation_history.append(tool_res) # type: ignore
-
                 console.print("\n[bold bright_blue]🔄 Processing results...[/bold bright_blue]")
-
                 follow_up_stream = completion(
                     model=model_name,
-                    messages=conversation_history, 
-                    tools=tools, 
-                    max_tokens=max_tokens, 
+                    messages=conversation_history,
+                    tools=tools,
+                    max_tokens=max_tokens,
                     api_base=api_base_url,
                     stream=True
                 )
-
                 follow_up_content = ""
-                reasoning_started_printed_follow_up = False 
+                reasoning_started_printed_follow_up = False
                 reasoning_content_accumulated_follow_up = ""
-
                 for chunk in follow_up_stream:
                     if hasattr(chunk.choices[0].delta, 'reasoning_content') and chunk.choices[0].delta.reasoning_content:
                         reasoning_chunk_content_follow_up = chunk.choices[0].delta.reasoning_content
@@ -1364,127 +1072,405 @@ def stream_llm_response(user_message: str):
                                 console.print("\n[bold blue]💭 Reasoning...[/bold blue]", end="")
                                 reasoning_started_printed_follow_up = True
                             console.print(".", end="")
-                        
                     elif chunk.choices[0].delta.content:
                         if reasoning_started_printed_follow_up and reasoning_style != "full":
-                            console.print() 
+                            console.print()
                             reasoning_started_printed_follow_up = False
-
-                        if not follow_up_content: 
+                        if not follow_up_content:
                              console.print("\n\n[bold bright_blue]🤖 Assistant>[/bold bright_blue] ", end="")
-
                         follow_up_content += chunk.choices[0].delta.content
                         console.print(chunk.choices[0].delta.content, end="")
-
                 if reasoning_started_printed_follow_up and reasoning_style == "compact" and not follow_up_content:
-                    console.print() 
-
-                console.print() 
-
+                    console.print()
+                console.print()
                 assistant_follow_up_message = {
                     "role": "assistant",
                     "content": follow_up_content
                 }
-                if reasoning_content_accumulated_follow_up: 
+                if reasoning_content_accumulated_follow_up:
                     assistant_follow_up_message["reasoning_content_full"] = reasoning_content_accumulated_follow_up
                 conversation_history.append(assistant_follow_up_message)
         else:
-            # No tool calls, just store the regular response
             conversation_history.append(assistant_message)
-
         return {"success": True}
-
     except Exception as e:
         error_msg = f"LLM API error: {str(e)}"
         console.print(f"\n[bold red]❌ {error_msg}[/bold red]")
         return {"error": error_msg}
 
-
 # --------------------------------------------------------------------------------
-# 7. Main interactive loop
+# 7. Test & Main interactive loop
 # --------------------------------------------------------------------------------
 
-def test_inference_endpoint():
-    """Tests the configured inference endpoint and token counting, then exits."""
-    console.print("[bold blue]🧪 Testing inference endpoint configuration...[/bold blue]")
-    # Get current config using the utility function that respects overrides and env vars
-    model_name = get_config_value("model", DEFAULT_LITELLM_MODEL)
-    api_base_url = get_config_value("api_base", DEFAULT_LITELLM_API_BASE)
-    # Use a low, fixed temperature for the test for predictability
+def _summarize_error_message(error_message: str, summary_model_name: str, api_base: str) -> str:
+    """Uses an LLM to summarize an error message concisely."""
+    if not error_message:
+        return ""
+    
+    # Limit the error message length to avoid excessive token usage for summarization
+    max_error_len_for_summary = 1000
+    truncated_error_message = error_message[:max_error_len_for_summary]
+    if len(error_message) > max_error_len_for_summary:
+        truncated_error_message += "..."
+
+    prompt = f"Summarize the following technical error message very concisely (e.g., in 5-10 words or a short phrase). Focus on the core issue:\n\n---\n{truncated_error_message}\n---\n\nConcise Summary:"
+    
+    try:
+        response = completion(
+            model=summary_model_name,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=50, # Allow short summary
+            api_base=api_base,
+            stream=False
+        )
+        summary = response.choices[0].message.content.strip()
+        return f"Summary: {summary}" if summary else error_message # Fallback to original if summary is empty
+    except Exception as e:
+        # If summarization fails, return the original (potentially truncated) error
+        # console.print(f"[dim]Error summarizing error message: {e}[/dim]")
+        return truncated_error_message # Or just error_message if you prefer full original on summary failure
+
+def _test_single_model_capabilities(model_label: str, model_name_to_test: str, api_base_to_test: str, expect_tools: bool) -> Dict:
+    """Helper function to test capabilities of a single model."""
+    results = {
+        "label": model_label,
+        "name": model_name_to_test,
+        "available": "N",
+        "tool_support": "N/A",
+        "context_kb": "N/A",
+        "inference_time_s": "N/A",
+        "error_details": ""
+    }
+    if not model_name_to_test:
+        results["error_details"] = "Model name not configured."
+        results["available"] = "Skipped"
+        return results
+
+    console.print(f"\n[bold blue]🧪 Testing Model: [cyan]{model_label} ({model_name_to_test})[/cyan]...[/bold blue]")
     temperature_for_test = 0.1
+    start_time = time.time()
 
-    console.print(f"  Configured Model: [cyan]{model_name}[/cyan]")
-    console.print(f"  Configured API Base: [cyan]{api_base_url if api_base_url else 'LiteLLM default/environment configured'}[/cyan]")
-    console.print(f"  Temperature for test: [cyan]{temperature_for_test}[/cyan]")
-
+    console.print("[yellow]  1. Attempting basic API call...[/yellow]", end="")
     test_messages = [{"role": "user", "content": "Test: Respond with 'ok'."}]
-    api_key_name_hint = "API key" # Generic term
-    # Try to infer API key name for better user message
-    if api_base_url:
-        if "openai" in api_base_url.lower() or "gpt-" in model_name.lower():
+    api_key_name_hint = "API key"
+    if api_base_to_test:
+        if "openai" in api_base_to_test.lower() or "gpt-" in model_name_to_test.lower():
             api_key_name_hint = "OPENAI_API_KEY"
-        elif "deepseek" in api_base_url.lower() or "deepseek" in model_name.lower():
+        elif "deepseek" in api_base_to_test.lower() or "deepseek" in model_name_to_test.lower():
             api_key_name_hint = "DEEPSEEK_API_KEY"
-        elif "anthropic" in api_base_url.lower() or "claude" in model_name.lower():
+        elif "anthropic" in api_base_to_test.lower() or "claude" in model_name_to_test.lower():
             api_key_name_hint = "ANTHROPIC_API_KEY"
-        elif "openrouter" in api_base_url.lower():
+        elif "openrouter" in api_base_to_test.lower():
             api_key_name_hint = "OPENROUTER_API_KEY"
 
+    api_base_for_call = api_base_to_test # Start with the global/passed base
+
+    # Heuristic to decide if we should override the global api_base for this specific model test.
+    # This allows testing direct provider models when the global LITELLM_API_BASE is set
+    # to a different provider or an aggregator that might not proxy this specific model correctly.
+    if model_name_to_test and api_base_for_call: # Only adjust if a global base is actually set
+        provider_from_model_name = model_name_to_test.split('/')[0].lower()
+        
+        # Known direct provider domains that LiteLLM has good defaults for.
+        # Keys are provider prefixes (lowercase), values are parts of their default domain.
+        known_direct_providers_domains = {
+            "openai": "api.openai.com",
+            "anthropic": "api.anthropic.com",
+            "deepseek": "api.deepseek.com", # Native DeepSeek API
+            "google": "googleapis.com",    # For Gemini models
+            "cohere": "api.cohere.ai",
+            "cerebras": "api.cerebras.com" # LiteLLM's default for Cerebras
+        }
+
+        if provider_from_model_name in known_direct_providers_domains and \
+           known_direct_providers_domains[provider_from_model_name] not in api_base_for_call.lower():
+            if provider_from_model_name == "google":
+                api_base_for_call = "https://generativelanguage.googleapis.com"
+                console.print(f"[dim]  (Note: Testing '{model_name_to_test}' with explicit Google API base: '{api_base_for_call}')[/dim]")
+            else:
+                # For other direct providers, let LiteLLM use its default by setting api_base to None
+                api_base_for_call = None
+                console.print(f"[dim]  (Note: Testing '{model_name_to_test}' with its provider's default API base, not global '{api_base_to_test}')[/dim]")
+
+    if "gemini" in model_name_to_test.lower() or "google" in model_name_to_test.lower() : # Broaden check for Gemini
+        console.print(f"[bold yellow blink]DEBUG Gemini Test Params:[/bold yellow blink] model='{model_name_to_test}', api_base_for_call='{api_base_for_call}'")
+
+    # Prepare keyword arguments for litellm.completion
+    completion_kwargs = {}
+    # If we are targeting Google's direct API base for Gemini, explicitly disable proxies
+    # to prevent interference from global proxy env vars (e.g., LITELLM_PROXY_API_BASE or HTTPS_PROXY).
+    if model_name_to_test and "google" in model_name_to_test.split('/')[0].lower() and \
+       api_base_for_call == "https://generativelanguage.googleapis.com":
+        completion_kwargs["proxies"] = None # You can also try proxies={}
+        console.print(f"[dim]  (Note: Explicitly disabling proxies for direct Google API call to '{model_name_to_test}')[/dim]")
+
     try:
-        console.print("\n[yellow]Attempting a small API call...[/yellow]")
         response = completion(
-            model=model_name,
+            model=model_name_to_test,
             messages=test_messages,
-            api_base=api_base_url, # Pass None if not set, litellm handles it
+            api_base=api_base_for_call, # Use the potentially adjusted API base
             temperature=temperature_for_test,
-            max_tokens=20, # Keep it small for a test
-            timeout=30 # Generous timeout for a test
+            max_tokens=20,
+            timeout=30,
+            **completion_kwargs # Pass additional kwargs like proxies
         )
         response_content = response.choices[0].message.content
-        console.print(f"[green]✓ API call successful.[/green]")
-        console.print(f"  LLM Response: \"{response_content.strip()}\"")
+        console.print(f"[green] ✓ OK[/green] (LLM: \"{response_content.strip()}\")")
+        results["available"] = "Y"
+        results["inference_time_s"] = f"{time.time() - start_time:.2f}"
 
-        # Correlated check: Token counting
+        console.print("[yellow]  2. Testing token counting & context...[/yellow]", end="")
         try:
-            tokens_used = token_counter(model=model_name, messages=test_messages)
-            console.print(f"[green]✓ Token counting successful for model '{model_name}'.[/green]")
-            console.print(f"  Tokens for test message: {tokens_used}")
+            context_size, _ = get_model_context_window(model_name_to_test, return_match_status=True)
+            results["context_kb"] = f"{context_size // 1000}k"
+            console.print(f"[green] ✓ OK[/green] (Context: {results['context_kb']})")
         except Exception as e_tc:
-            console.print(f"[yellow]⚠️ Token counting for model '{model_name}' failed or is not supported by LiteLLM: {e_tc}[/yellow]")
+            console.print(f"[yellow] ⚠️ Failed[/yellow] ({e_tc})")
+            results["context_kb"] = "Error"
 
-        console.print("\n[bold green]✅ Inference endpoint test passed.[/bold green]")
+        console.print("[yellow]  3. Testing tool calling capability...[/yellow]", end="")
+        if expect_tools:
+            dummy_tool_for_test = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "get_dummy_data_for_test",
+                        "description": "A dummy function to test tool calling. Retrieves dummy data.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "data_type": {
+                                    "type": "string",
+                                    "description": "The type of dummy data to retrieve, e.g., 'text'."
+                                }
+                            },
+                            "required": ["data_type"]
+                        }
+                    }
+                }
+            ]
+            tool_test_messages = [{"role": "user", "content": "Can you use a tool to get dummy text data for a test?"}]
+            try:
+                tool_response = completion(
+                    model=model_name_to_test,
+                    messages=tool_test_messages,
+                    tools=dummy_tool_for_test,
+                    api_base=api_base_for_call, # Use the potentially adjusted API base
+                    temperature=temperature_for_test,
+                    max_tokens=150,
+                    timeout=30,
+                    **completion_kwargs # Pass additional kwargs like proxies
+                )
+                if tool_response.choices[0].message.tool_calls and len(tool_response.choices[0].message.tool_calls) > 0:
+                    console.print(f"[green] ✓ Yes[/green] (Called: '{tool_response.choices[0].message.tool_calls[0].function.name}')")
+                    results["tool_support"] = "Y"
+                elif tool_response.choices[0].message.content:
+                    console.print(f"[yellow] ⚠️ No[/yellow] (Responded with text)")
+                    results["tool_support"] = "N"
+                else:
+                    console.print(f"[yellow] ⚠️ Inconclusive[/yellow]")
+                    results["tool_support"] = "N"
+            except Exception as e_tool_call:
+                console.print(f"[red] ❌ Error[/red] ({e_tool_call})")
+                results["tool_support"] = "Error"
+                if not results["error_details"]: results["error_details"] = f"Tool call test: {e_tool_call}"
+        else:
+            console.print(" [dim]N/A[/dim]")
+            results["tool_support"] = "N/A"
+    except httpx.ConnectError as e:
+        console.print(f"[red] ❌ Connection Error[/red] ({api_base_to_test or 'Default LiteLLM endpoint'})")
+        results["available"] = "N"
+        results["error_details"] = f"Connection Error: {e}"
+    except httpx.TimeoutException as e:
+        console.print(f"[red] ❌ Timeout[/red]")
+        results["available"] = "N"
+        results["error_details"] = f"Timeout: {e}"
+    except Exception as e:
+        error_str = str(e)
+        # Display a truncated version of the error directly on the CLI
+        console.print(f"[red] ❌ API Error[/red]: {error_str[:250]}{'...' if len(error_str) > 250 else ''}")
+        results["available"] = "N"
+        results["error_details"] = error_str
+        if "authentication" in error_str.lower() or "api key" in error_str.lower() or "401" in error_str:
+            results["error_details"] += f" (Hint: Check {api_key_name_hint})"
+        elif "model_not_found" in error_str.lower() or ("404" in error_str and "Model" in error_str):
+            results["error_details"] += f" (Hint: Model '{model_name_to_test}' not found or misspelled at '{api_base_to_test}')"
+    if results["available"] == "N" and results["inference_time_s"] == "N/A":
+         results["inference_time_s"] = f"{time.time() - start_time:.2f}"
+    return results
+
+def test_inference_endpoint(specific_model_name: str = None):
+    """Tests all configured inference endpoints and capabilities, then exits."""
+    if specific_model_name:
+        console.print(f"[bold blue]🧪 Testing Specific Model: [cyan]{specific_model_name}[/cyan]...[/bold blue]")
+    else:
+        console.print("[bold blue]🧪 Testing All Configured Inference Endpoints & Capabilities...[/bold blue]")
+        console.print("[dim]Note: This test covers models from MODEL_CONTEXT_WINDOWS and explicitly configured role-based models.[/dim]")
+    
+    api_base_url = get_config_value("api_base", DEFAULT_LITELLM_API_BASE)
+    role_based_models_config = [
+        {"label": "DEFAULT",   "name_var": LITELLM_MODEL_DEFAULT,   "expect_tools": True},
+        {"label": "ROUTING",   "name_var": LITELLM_MODEL_ROUTING,   "expect_tools": False},
+        {"label": "TOOLS",     "name_var": LITELLM_MODEL_TOOLS,     "expect_tools": True},
+        {"label": "CODING",    "name_var": LITELLM_MODEL_CODING,    "expect_tools": False},
+        {"label": "KNOWLEDGE", "name_var": LITELLM_MODEL_KNOWLEDGE, "expect_tools": False},
+    ]
+    model_details = {}
+    default_model_available = False
+    all_results = []
+    overall_success = True
+
+    if specific_model_name:
+        models_to_test_set = {specific_model_name}
+    else:
+        models_to_test_set = set(MODEL_CONTEXT_WINDOWS.keys())
+        # Add role-based models to the set for comprehensive testing
+        for config in role_based_models_config:
+            model_name_val = config["name_var"]
+            if model_name_val:
+                models_to_test_set.add(model_name_val)
+
+    # Populate model_details for roles, regardless of single or all test mode
+    model_details = {}
+    for config in role_based_models_config:
+        model_name = config["name_var"]
+        if model_name:
+            if model_name not in model_details:
+                model_details[model_name] = {"roles": [], "expect_tools": config["expect_tools"]}
+            model_details[model_name]["roles"].append(config["label"])
+            if config["expect_tools"]: # If any role for this model expects tools, set it to true for the test
+                model_details[model_name]["expect_tools"] = True
+    
+    if not models_to_test_set:
+        console.print("[yellow]Warning: No models specified or found to test.[/yellow]")
         sys.exit(0)
 
-    except httpx.ConnectError as e:
-        console.print(f"[bold red]❌ API Call Failed: Connection Error.[/bold red]\n   Could not connect to API base: {api_base_url or 'Default LiteLLM endpoint'}\n   Details: {e}\n   Troubleshooting:\n     - Check internet connection.\n     - Verify `LITELLM_API_BASE` URL if set.")
+    for model_name in sorted(list(models_to_test_set)):
+        if not model_name:
+            all_results.append({
+                "label": "Invalid/Empty", "name": "Not Configured", "available": "N/A",
+                "tool_support": "N/A", "context_kb": "N/A", "inference_time_s": "N/A", "error_details": "Empty model name encountered."
+            })
+            continue
+
+        current_model_details = model_details.get(model_name)
+        display_label = model_name
+        expect_tools_for_this_model = True # Default for models only from MODEL_CONTEXT_WINDOWS
+
+        if current_model_details:
+            display_label = f"{model_name} ({', '.join(current_model_details['roles'])})"
+            expect_tools_for_this_model = current_model_details['expect_tools']
+        elif model_name in MODEL_CONTEXT_WINDOWS and not specific_model_name: # Only add (Context Map) if not specifically testing
+            display_label = f"{model_name} (Context Map)"
+        
+        api_base_for_model = api_base_url
+        result = _test_single_model_capabilities(
+            model_label=display_label,
+            model_name_to_test=model_name,
+            api_base_to_test=api_base_for_model,
+            expect_tools=expect_tools_for_this_model
+        )
+        all_results.append(result)
+        if result["available"] != "Y":
+            overall_success = False
+        if model_name == LITELLM_MODEL_DEFAULT and result["available"] == "Y": # Check if the default model is one of the tested and available
+            default_model_available = True
+            
+    # Summarize errors if DEFAULT model is available
+    if default_model_available:
+        console.print(f"\n[dim]Default model ([cyan]{LITELLM_MODEL_DEFAULT}[/cyan]) is available. Attempting to summarize error messages for other models...[/dim]")
+        for res in all_results:
+            # Ensure error_details is a string before attempting to summarize
+            # This handles cases where it might be None or another type if a model was skipped early.
+            if not isinstance(res.get("error_details"), str):
+                res["error_details"] = str(res.get("error_details", "")) # Convert to string or empty string
+
+            # Only summarize for other models that failed and have error details
+            if res["name"] != LITELLM_MODEL_DEFAULT and res["available"] == "N" and res["error_details"]:
+                original_error = res["error_details"]
+                res["error_details"] = _summarize_error_message(original_error, LITELLM_MODEL_DEFAULT, api_base_url)
+
+
+    console.print("\n\n[bold green]📊 Inference Test Summary[/bold green]")
+    summary_table = Table(title="Model Capabilities Test Results", show_lines=True)
+    summary_table.add_column("Model / Role", style="cyan", no_wrap=True, max_width=50)
+    summary_table.add_column("Model Name (Actual)", style="magenta", max_width=40)
+    summary_table.add_column("Available", justify="center")
+    summary_table.add_column("Tool Support", justify="center")
+    summary_table.add_column("Context", justify="right")
+    summary_table.add_column("Time (s)", justify="right")
+    # Increase max_width for Notes/Errors. Rich will try to make it this wide if console allows.
+    if SHOW_TEST_INFERENCE_NOTES_ERRORS_COLUMN:
+        notes_errors_column_width = console.width // 3 if console.width > 120 else 60
+        summary_table.add_column("Notes/Errors", style="dim", overflow="fold", max_width=notes_errors_column_width)
+
+    for res in all_results:
+        available_style = "green" if res["available"] == "Y" else "red" if res["available"] == "N" else "yellow"
+        tool_style = "green" if res["tool_support"] == "Y" else "red" if res["tool_support"] == "N" else "dim"
+        summary_table.add_row(
+            res["label"], 
+            res["name"],  
+            f"[{available_style}]{res['available']}[/{available_style}]",
+            f"[{tool_style}]{res['tool_support']}[/{tool_style}]",
+            res["context_kb"],
+            res["inference_time_s"],
+        )
+        if SHOW_TEST_INFERENCE_NOTES_ERRORS_COLUMN:
+            summary_table.columns[-1].style = "dim" # Ensure the style is set if column was added
+            # The previous add_row call needs to be adjusted if the column is conditional
+            # This is a bit tricky with Rich's Table.add_row. Let's adjust the row data.
+            row_data = [res["label"], res["name"], f"[{available_style}]{res['available']}[/{available_style}]", f"[{tool_style}]{res['tool_support']}[/{tool_style}]", res["context_kb"], res["inference_time_s"]]
+            if SHOW_TEST_INFERENCE_NOTES_ERRORS_COLUMN:
+                row_data.append(res["error_details"])
+            summary_table.add_row(*row_data)
+
+    # Calculate and add Totals/Summary Stats row
+    total_models_tested = len([res for res in all_results if res["available"] != "N/A" and res["name"] != "Not Configured"])
+    total_available_y = sum(1 for res in all_results if res["available"] == "Y")
+    total_available_n = sum(1 for res in all_results if res["available"] == "N") # Count "N"
+    total_tool_support_y = sum(1 for res in all_results if res["tool_support"] == "Y")
+    
+    # Context stats
+    total_context_known = sum(1 for res in all_results if res["context_kb"] != "N/A" and res["context_kb"] != "Error")
+    total_context_unknown_or_error = sum(1 for res in all_results if res["context_kb"] == "N/A" or res["context_kb"] == "Error")
+
+    summary_table.add_section() # Adds a visual separator line
+    overall_stats_row_data = [
+        "[bold]Overall Stats[/bold]",
+        f"[dim]{total_models_tested} models tested[/dim]",
+        f"[bold green]{total_available_y}Y[/bold green] / [bold red]{total_available_n}N[/bold red]", # Availability Y/N counts
+        f"[bold green]{total_tool_support_y}Y[/bold green]", # Tool Support Y count
+        f"[bold green]{total_context_known}✓[/bold green] / [bold red]{total_context_unknown_or_error}?[/bold red]", # Context Known/Unknown counts
+        "N/A", # No total for inference time
+    ]
+    if SHOW_TEST_INFERENCE_NOTES_ERRORS_COLUMN:
+        overall_stats_row_data.append("") # Empty for Notes/Errors column
+
+    summary_table.add_row(*overall_stats_row_data)
+    console.print(summary_table)
+    if overall_success:
+        console.print("\n[bold green]✅ All actively tested models passed basic availability checks.[/bold green]")
+    else:
+        console.print("\n[bold red]❌ Some models failed availability checks. Please review the errors above and your .env configuration.[/bold red]")
+    
+    # Exit status depends on whether any model failed, not just overall_success
+    # if any 'N' in available for the models that were actually attempted.
+    if any(r['available'] == 'N' for r in all_results if r['name'] != "Not Configured"):
         sys.exit(1)
-    except httpx.TimeoutException as e:
-        console.print(f"[bold red]❌ API Call Failed: Timeout.[/bold red]\n   Request to {api_base_url or 'Default LiteLLM endpoint'} timed out.\n   Details: {e}\n   Troubleshooting:\n     - Server might be slow/overloaded.\n     - Check network for high latency.")
-        sys.exit(1)
-    except Exception as e: # Catch other litellm or general errors
-        error_str = str(e)
-        console.print(f"[bold red]❌ API Call Failed: An error occurred.[/bold red]\n   Details: {error_str}\n   Troubleshooting:")
-        if "authentication" in error_str.lower() or "api key" in error_str.lower() or "401" in error_str:
-            console.print(f"     - Check your {api_key_name_hint} environment variable.\n     - Ensure it's valid and has permissions for '{model_name}'.")
-        elif "model_not_found" in error_str.lower() or ("404" in error_str and "Model" in error_str):
-             console.print(f"     - Model '{model_name}' might be unavailable at '{api_base_url or 'Default LiteLLM endpoint'}' or misspelled.\n     - Check `LITELLM_MODEL` and `LITELLM_API_BASE`.")
-        else:
-            console.print(f"     - Review `LITELLM_MODEL` and `LITELLM_API_BASE`.\n     - Check provider's status page.")
-        sys.exit(1)
+    else:
+        sys.exit(0)
 
 def clear_screen():
-    """Clears the terminal screen."""
-    # For Windows
     if os.name == 'nt':
         _ = os.system('cls')
-    # For Mac and Linux (os.name is 'posix')
     else:
         _ = os.system('clear')
 
 def main():
     parser = argparse.ArgumentParser(
         description="AI Engineer: An AI-powered coding assistant.",
-        formatter_class=argparse.RawTextHelpFormatter # To preserve help text formatting
+        formatter_class=argparse.RawTextHelpFormatter
     )
     parser.add_argument(
         '--version',
@@ -1508,114 +1494,92 @@ def main():
         help='Enable timestamp display in the user prompt.'
     )
     parser.add_argument(
-        '--test-inference-endpoint',
-        action='store_true',
-        help='Test the configured inference endpoint with a simple API call, check token counting, and exit.'
+        '--test-inference',
+        metavar='MODEL_NAME',
+        type=str,
+        nargs='?', # Makes the argument optional
+        const='__TEST_ALL_MODELS__', # Value if flag is present without an argument
+        help='Test capabilities. If MODEL_NAME is provided, tests only that model. Otherwise, tests all known/configured models.'
     )
     args = parser.parse_args()
-
     clear_screen()
-    if args.test_inference_endpoint:
-        test_inference_endpoint() # This function will call sys.exit()
+    if args.test_inference is not None: # If the flag was used
+        if args.test_inference == '__TEST_ALL_MODELS__':
+            test_inference_endpoint(specific_model_name=None) # Test all
+        else:
+            test_inference_endpoint(specific_model_name=args.test_inference) # Test specific model
 
-    # Get the current model name to display in the welcome panel
-    current_model_name_for_display = get_config_value("model", DEFAULT_LITELLM_MODEL)
-    # Get context window size for the current model
-    # Use imported get_model_context_window
+    current_model_name_for_display = get_config_value("model", LITELLM_MODEL_DEFAULT)
     context_window_size, used_default = get_model_context_window(current_model_name_for_display, return_match_status=True)
-    context_window_display = f"{context_window_size // 1000}k tokens" # e.g. "128k tokens"
+    context_window_display = f"{context_window_size // 1000}k tokens"
     if used_default:
         context_window_display += " (default)"
-
-    # Create an elegant instruction panel listing key commands
-    instructions = f"""🧠 Model: [bold magenta]{current_model_name_for_display}[/bold magenta] ([dim]{context_window_display}[/dim])
+    instructions = f"""🧠 Default Model: [bold magenta]{current_model_name_for_display}[/bold magenta] ([dim]{context_window_display}[/dim])
+   Routing: [dim]{LITELLM_MODEL_ROUTING or 'Not Set'}[/dim] | Tools: [dim]{LITELLM_MODEL_TOOLS or 'Not Set'}[/dim]
+   Coding: [dim]{LITELLM_MODEL_CODING or 'Not Set'}[/dim] | Knowledge: [dim]{LITELLM_MODEL_KNOWLEDGE or 'Not Set'}[/dim]
 
 [bold bright_blue]🎯 Commands:[/bold bright_blue]
   • [bright_cyan]/exit[/bright_cyan] or [bright_cyan]/quit[/bright_cyan] - End the session.
   • [bright_cyan]/help[/bright_cyan] - Display detailed help.
 
 [bold white]👥 Just ask naturally, like you are communicating with a colleague.[/bold white]"""
-
     console.print(Panel(
         instructions,
         border_style="blue",
         padding=(1, 2),
-        title="[bold blue]🤖 AI Code Assistant[/bold blue]",
+        title="[bold blue]🤖 AI Code Assistant (Multi-Model)[/bold blue]",
         title_align="left"
     ))
     console.print()
-
     global SHOW_TIMESTAMP_IN_PROMPT
     if args.time:
         SHOW_TIMESTAMP_IN_PROMPT = True
         console.print("[green]✓ Timestamp display in prompt enabled via --time flag.[/green]")
-
-    if args.script: # Changed from args.init
+    if args.script:
         if not args.noconfirm:
             confirmation = prompt_session.prompt(
-                f"Execute script '[bright_cyan]{args.script}[/bright_cyan]'? [y/N]: ", # Changed from args.init
-                default="n" # Default to No
+                f"Execute script '[bright_cyan]{args.script}[/bright_cyan]'? [y/N]: ",
+                default="n"
             ).strip().lower()
             if confirmation not in ["y", "yes"]:
                 console.print("[yellow]Script execution cancelled by user.[/yellow]")
             else:
-                console.print(f"[bold green]Executing script: {args.script}[/bold green]") # Changed from args.init
-                # Construct the command as if typed by the user
-                script_command_str = f"/script {args.script}" # Changed from /init
-                try_handle_script_command(script_command_str, is_startup_script=True) # Changed from try_handle_init_command
-        else: # --noconfirm was used
-            script_command_str = f"/script {args.script}" # Changed from /init
-            try_handle_script_command(script_command_str, is_startup_script=True) # Changed from try_handle_init_command
-
+                console.print(f"[bold green]Executing script: {args.script}[/bold green]")
+                script_command_str = f"/script {args.script}"
+                try_handle_script_command(script_command_str, is_startup_script=True)
+        else:
+            script_command_str = f"/script {args.script}"
+            try_handle_script_command(script_command_str, is_startup_script=True)
     while True:
         try:
             prompt_prefix = ""
-            # Calculate context usage for the prompt
-            # Ensure conversation_history is accessible here (it's global)
-            # and get_config_value, get_model_context_window are imported
-            if conversation_history: # Only calculate if there's history
+            if conversation_history:
                 try:
-                    current_model_name = get_config_value("model", DEFAULT_LITELLM_MODEL) # Get current model
-                    # Get window size and status if default was used due to no match
-                    context_window_size, used_default_window_due_to_no_match = get_model_context_window(current_model_name, return_match_status=True)
-
-                    # Make sure conversation_history is not empty and model_name is valid for token_counter
-                    if conversation_history and current_model_name:
-                        # The first message is the system prompt, which is always there.
-                        tokens_used = token_counter(model=current_model_name, messages=conversation_history)
-
-                        if context_window_size > 0: # Avoid division by zero
+                    active_model_for_prompt_context = get_config_value("model", LITELLM_MODEL_DEFAULT)
+                    context_window_size, used_default_window_due_to_no_match = get_model_context_window(active_model_for_prompt_context, return_match_status=True)
+                    if conversation_history and active_model_for_prompt_context:
+                        tokens_used = token_counter(model=active_model_for_prompt_context, messages=conversation_history)
+                        if context_window_size > 0:
                             percentage_used = (tokens_used / context_window_size) * 100
                             default_note = ""
-                            # Add a note if the default window was used because the model name wasn't specifically found
                             if used_default_window_due_to_no_match:
                                 default_note = " (default window)"
                             prompt_prefix = f"[Ctx: {percentage_used:.0f}%{default_note}] "
-                        else: # Should not happen if get_model_context_window returns a default
+                        else:
                             prompt_prefix = f"[Ctx: {tokens_used} toks] "
                 except Exception:
-                    # Silently fail or print a dim message if token calculation fails
-                    # For example, if litellm.token_counter doesn't support the model
-                    # console.print(f"[dim]Could not calculate token usage: {e}[/dim]")
-                    pass # Keep prompt clean if there's an error
-
+                    pass
             if SHOW_TIMESTAMP_IN_PROMPT:
                 prompt_prefix += f"{time.strftime('%H:%M:%S')} "
-
             user_input = prompt_session.prompt(f"{prompt_prefix}🔵 You> ").strip()
-
         except (EOFError, KeyboardInterrupt):
             console.print("\n[bold yellow]👋 Exiting gracefully...[/bold yellow]")
-            sys.exit(0) # Explicitly exit
-
+            sys.exit(0)
         if not user_input:
             continue
-
         if user_input.lower() in ["exit", "quit", "/exit", "/quit"]:
             console.print("[bold bright_blue]👋 Goodbye! Happy coding![/bold bright_blue]")
-            sys.exit(0) # Explicitly exit
-
-        # Check for and handle commands
+            sys.exit(0)
         if try_handle_add_command(user_input):
             continue
         if try_handle_set_command(user_input):
@@ -1624,125 +1588,96 @@ def main():
             continue
         if try_handle_shell_command(user_input):
             continue
-        if try_handle_session_command(user_input): # New: session handler
+        if try_handle_session_command(user_input):
             continue
-        if try_handle_rules_command(user_input): # New: rules handler
+        if try_handle_rules_command(user_input):
             continue
         if try_handle_context_command(user_input):
             continue
-        if try_handle_prompt_command(user_input): # New: prompt command handler
+        if try_handle_prompt_command(user_input):
             continue
-        if try_handle_script_command(user_input): # Changed from try_handle_init_command
-            continue 
-        if try_handle_ask_command(user_input): # New: ask command handler
+        if try_handle_script_command(user_input):
             continue
-        if try_handle_time_command(user_input): # New: time command handler
+        if try_handle_ask_command(user_input):
             continue
-
-        # Use imported stream_llm_response
-        response_data = stream_llm_response(user_input) # user_input is the raw message
-
+        if try_handle_time_command(user_input):
+            continue
+        if try_handle_test_command(user_input):
+            continue
+        target_model_name = get_config_value("model", LITELLM_MODEL_DEFAULT)
+        response_data = stream_llm_response(user_input)
         if response_data.get("error"):
-            # stream_llm_response already prints its own detailed API error.
             pass
-
-
     console.print("[bold blue]✨ Session finished. Thank you for using AI Engineer![/bold blue]")
-    sys.exit(0) # Ensure exit at the end of main too
+    sys.exit(0)
 
 def execute_script_line(line: str):
-    """
-    Executes a single line from an init script.
-    Tries to match it against known commands, otherwise sends to LLM.
-    """
-    console.print(f"\n[bold bright_magenta]📜 Script> {line}[/bold bright_magenta]") # Changed icon for clarity
+    console.print(f"\n[bold bright_magenta]📜 Script> {line}[/bold bright_magenta]")
     if try_handle_add_command(line): return
     if try_handle_set_command(line): return
-    if try_handle_help_command(line): return # Less likely in a script, but possible
+    if try_handle_help_command(line): return
     if try_handle_shell_command(line): return
     if try_handle_session_command(line): return
     if try_handle_rules_command(line): return
     if try_handle_context_command(line): return
     if try_handle_prompt_command(line): return
-    # If it's not any of the above commands, treat it as a prompt to the LLM
+    if try_handle_test_command(line): return
     stream_llm_response(line)
 
-def try_handle_script_command(user_input: str, is_startup_script: bool = False) -> bool: # Renamed from try_handle_init_command
-    """
-    Handles the /script <script_path> command.
-    Executes a sequence of AI Engineer commands from the specified script file.
-    """
+def try_handle_script_command(user_input: str, is_startup_script: bool = False) -> bool:
     command_prefix = "/script"
     stripped_input = user_input.strip()
-
-    # Strict check for interactive use; startup script is handled by the `is_startup_script` part
     if not (stripped_input.lower() == command_prefix or stripped_input.lower().startswith(command_prefix + " ") or (is_startup_script and stripped_input.lower() == command_prefix)):
         return False
-
     prefix_with_space = command_prefix + " "
     script_path_arg = ""
     if stripped_input.lower().startswith(prefix_with_space):
         script_path_arg = stripped_input[len(prefix_with_space):].strip()
-    elif is_startup_script and stripped_input.lower() == command_prefix: # Case for --script from CLI
-        console.print("[yellow]Usage: /script <script_path>[/yellow]")
+    elif is_startup_script and stripped_input.lower() == command_prefix:
+        console.print("[yellow]Usage: --script <script_path>[/yellow]")
         return True
-
     if not script_path_arg:
         console.print("[yellow]Usage: /script <script_path>[/yellow]")
         console.print("[yellow]  Example: /script ./my_setup_script.aiescript[/yellow]")
         console.print("[yellow]  The script file contains AI Engineer commands, one per line. Lines starting with '#' are comments.[/yellow]")
         return True
-
     try:
         normalized_script_path = normalize_path(script_path_arg)
         console.print(f"[bold blue]🚀 Executing script: [bright_cyan]{normalized_script_path}[/bright_cyan][/bold blue]")
         with open(normalized_script_path, "r", encoding="utf-8") as f:
             for line_num, line in enumerate(f, 1):
                 stripped_line = line.strip()
-                if not stripped_line or stripped_line.startswith("#"): # Skip empty lines and comments
+                if not stripped_line or stripped_line.startswith("#"):
                     continue
                 execute_script_line(stripped_line)
-        console.print(f"[bold green]✅ Script execution finished: [bright_cyan]{normalized_script_path}[/bright_cyan][/bold green]\n")
-
+        console.print(f"[bold green]✅ Script execution finished: [bright_cyan]{normalized_script_path}[/bright_cyan]\n")
     except FileNotFoundError:
         console.print(f"[bold red]✗ Error: Script file not found at '[bright_cyan]{script_path_arg}[/bright_cyan]'[/bold red]")
-    except ValueError as e: # From normalize_path
+    except ValueError as e:
         console.print(f"[bold red]✗ Error: Invalid script path '[bright_cyan]{script_path_arg}[/bright_cyan]': {e}[/bold red]")
     except Exception as e:
         console.print(f"[bold red]✗ Error during script execution from '{script_path_arg}': {e}[/bold red]")
-    return True # Command was handled (attempted execution or printed error/usage)
+    return True
 
 def try_handle_ask_command(user_input: str) -> bool:
-    """
-    Handles the /ask <text> command.
-    Treats the text following /ask as a user prompt to the LLM.
-    """
     command_prefix = "/ask"
     stripped_input = user_input.strip()
-
-    # Strict check
     if not (stripped_input.lower() == command_prefix or stripped_input.lower().startswith(command_prefix + " ")):
         return False
-
     prefix_with_space = command_prefix + " "
     text_to_ask = ""
     if stripped_input.lower().startswith(prefix_with_space):
         text_to_ask = stripped_input[len(prefix_with_space):].strip()
-    elif stripped_input.lower() == command_prefix: # Just "/ask"
+    elif stripped_input.lower() == command_prefix:
         console.print("[yellow]Usage: /ask <text>[/yellow]")
         console.print("[yellow]  Example: /ask What is the capital of France?[/yellow]")
         return True
-
-    stream_llm_response(text_to_ask) # Pass the text directly to the LLM
-    return True # Command was handled
+    stream_llm_response(text_to_ask)
+    return True
 
 def try_handle_time_command(user_input: str) -> bool:
-    """
-    Handles the /time command to toggle timestamp display in the prompt.
-    """
     global SHOW_TIMESTAMP_IN_PROMPT
     command_name_lower = "/time"
-
     if user_input.strip().lower() == command_name_lower:
         SHOW_TIMESTAMP_IN_PROMPT = not SHOW_TIMESTAMP_IN_PROMPT
         if SHOW_TIMESTAMP_IN_PROMPT:
@@ -1751,6 +1686,30 @@ def try_handle_time_command(user_input: str) -> bool:
             console.print("[yellow]✓ Timestamp display in prompt: OFF[/yellow]")
         return True
     return False
+
+def try_handle_test_command(user_input: str) -> bool:
+    command_prefix = "/test"
+    stripped_input = user_input.strip()
+    if not (stripped_input.lower() == command_prefix or stripped_input.lower().startswith(command_prefix + " ")):
+        return False
+    prefix_with_space = command_prefix + " "
+    command_body = ""
+    if stripped_input.lower().startswith(prefix_with_space):
+        command_body = stripped_input[len(prefix_with_space):].strip()
+    parts = command_body.split(maxsplit=1)
+    sub_command = parts[0].lower() if parts else ""
+    if sub_command == "inference":
+        test_inference_endpoint()
+        return True
+    elif sub_command == "all":
+        console.print("[bold blue]Running all available tests...[/bold blue]")
+        test_inference_endpoint()
+        return True
+    else:
+        console.print("[yellow]Usage: /test <subcommand> [arguments][/yellow]")
+        console.print("[yellow]  all         - Run all available tests (currently runs 'inference').[/yellow]")
+        console.print("[yellow]  inference   - Test models from MODEL_CONTEXT_WINDOWS and configured roles for capabilities.[/yellow]")
+        return True
 
 if __name__ == "__main__":
     main()
