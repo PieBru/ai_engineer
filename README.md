@@ -174,18 +174,27 @@ You> Now review this codebase structure
 - Real-time reasoning visibility during processing
 - Enhanced problem-solving capabilities
 
-#### **Key Configuration Options (via `config.toml` or Environment Variables):**
-*   `LITELLM_MODEL`: Specifies the language model to use (e.g., "deepseek-reasoner").
-*   `LITELLM_API_BASE`: Sets the API base URL for the chosen model provider.
-*   `LITELLM_MAX_TOKENS`: Sets the maximum tokens for the LLM response (default: 8192).
-*   `REASONING_STYLE`: Controls the verbosity of the AI's reasoning output.
-    *   `full` (default): Shows the complete reasoning text.
-    *   `compact`: Shows "💭 Reasoning..." once, then prints dots (`.`) for progress.
-    *   `silent`: Suppresses reasoning output entirely.
-*   `REASONING_EFFORT`: Controls the AI's reasoning depth by modifying the prompt.
-    *   `low`: Instructs the LLM for concise reasoning.
-    *   `medium` (default): Standard reasoning detail.
-    *   `high`: Instructs the LLM for highly detailed, step-by-step reasoning.
+#### **Key Configuration Options (Primarily via Environment Variables):**
+Configuration is primarily managed through environment variables. If an environment variable is not set, a default value defined as a constant in the application code (e.g., `si_engineer.py`) will be used. These settings can also be adjusted at runtime using the `/set` command.
+
+*   **`LITELLM_MODEL`**: Specifies the language model.
+    *   Environment Variable: `LITELLM_MODEL`
+    *   Default: `"deepseek-reasoner"` (hardcoded in the application)
+*   **`LITELLM_API_BASE`**: Sets the API base URL for the model provider.
+    *   Environment Variable: `LITELLM_API_BASE`
+    *   Default: `"https://api.deepseek.com/v1"` (hardcoded in the application)
+*   **`LITELLM_MAX_TOKENS`**: Sets the maximum tokens for the LLM response.
+    *   Environment Variable: `LITELLM_MAX_TOKENS`
+    *   Default: `8192` (hardcoded in the application)
+*   **`REASONING_STYLE`**: Controls the verbosity of the AI's reasoning output.
+    *   Environment Variable: `REASONING_STYLE`
+    *   Possible values: `full`, `compact`, `silent`
+    *   Default: `"full"` (hardcoded in the application)
+*   **`REASONING_EFFORT`**: Controls the AI's reasoning depth by modifying the prompt.
+    *   Environment Variable: `REASONING_EFFORT`
+    *   Possible values: `low`, `medium`, `high`
+    *   Default: `"medium"` (hardcoded in the application)
+
 *   **Runtime Configuration (`/set` command)**: Many of these settings, along with others, can be adjusted during a session using the `/set <option_name> <value>` command. This allows for dynamic control over the AI's behavior. Available options for `/set` include:
     *   `model`: Change the language model (e.g., `/set model gpt-4o`).
     *   `api_base`: Update the API base URL (e.g., `/set api_base https://api.example.com/v1`).

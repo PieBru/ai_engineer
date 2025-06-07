@@ -7,7 +7,22 @@ leveraging AI's reasoning models for intelligent file operations,
 code analysis, and development assistance via natural conversation and function calling.
 """
 
+# Import default constants from config_utils first
+from src.config_utils import (
+    DEFAULT_LITELLM_MODEL,
+    DEFAULT_LITELLM_API_BASE,
+    DEFAULT_LITELLM_MAX_TOKENS,
+    DEFAULT_REASONING_EFFORT,
+    DEFAULT_REASONING_STYLE
+)
+
+# Now, define module-level configurations using these defaults
 import os
+LITELLM_MODEL = os.getenv("LITELLM_MODEL", DEFAULT_LITELLM_MODEL)
+LITELLM_API_BASE = os.getenv("LITELLM_API_BASE", DEFAULT_LITELLM_API_BASE)
+LITELLM_MAX_TOKENS = int(os.getenv("LITELLM_MAX_TOKENS", DEFAULT_LITELLM_MAX_TOKENS))
+REASONING_EFFORT = os.getenv("REASONING_EFFORT", DEFAULT_REASONING_EFFORT)
+REASONING_STYLE = os.getenv("REASONING_STYLE", DEFAULT_REASONING_STYLE)
 import json
 from pathlib import Path
 import sys # Keep sys for exit
@@ -22,7 +37,6 @@ import copy # For deepcopy
 import argparse # For command-line argument handling
 from textwrap import dedent # For /prompt command meta-prompts
 import httpx # For new MCP tools
-# Removed: import tomllib # For reading TOML config (Python 3.11+) - now in config_utils.py
 
 # Import modules from src/
 from src.config_utils import (
@@ -1086,37 +1100,36 @@ def stream_llm_response(user_message: str):
         # The user_message for this turn will be added to this copy, potentially augmented.
         messages_for_api_call = copy.deepcopy(conversation_history)
 
-        default_max_tokens_val = 8192
-        default_reasoning_effort_val = "medium"
-        default_reply_effort_val = "medium"
+        # Default values for settings if not overridden by env or runtime
+        # These are used as the final fallback if no other configuration is found.
+        # For most, we use the DEFAULT_... constants defined at the top of this file.
+        default_reply_effort_val = "medium" # No global constant for this one yet
         default_temperature_val = 0.7 # Common default for temperature
 
         # Removed local get_config_value definition.
         # Use the imported get_config_value function.
-        # It already uses CONFIG_FROM_TOML, RUNTIME_OVERRIDES, SUPPORTED_SET_PARAMS which are imported globals.
         # Use imported constants for defaults where applicable
-        model_name = get_config_value("model", "gpt-4o") # Use a reasonable default if not configured
-        api_base_url = get_config_value("api_base", None) # Let litellm handle default if not configured
-        reasoning_style = str(get_config_value("reasoning_style", "full")).lower()
+        model_name = get_config_value("model", DEFAULT_LITELLM_MODEL)
+        api_base_url = get_config_value("api_base", DEFAULT_LITELLM_API_BASE)
+        reasoning_style = str(get_config_value("reasoning_style", DEFAULT_REASONING_STYLE)).lower()
 
-        max_tokens_raw = get_config_value("max_tokens", default_max_tokens_val)
+        max_tokens_raw = get_config_value("max_tokens", DEFAULT_LITELLM_MAX_TOKENS)
         try:
             max_tokens = int(max_tokens_raw)
             if max_tokens <= 0:
-                max_tokens = default_max_tokens_val
+                max_tokens = DEFAULT_LITELLM_MAX_TOKENS
         except (ValueError, TypeError):
-            max_tokens = default_max_tokens_val
+            max_tokens = DEFAULT_LITELLM_MAX_TOKENS
 
         temperature_raw = get_config_value("temperature", default_temperature_val)
         try:
             temperature = float(temperature_raw)
-            # Use imported get_config_value
             # Optional: Add range validation here if desired, e.g., if not (0.0 <= temperature <= 2.0):
         except (ValueError, TypeError):
             console.print(f"[yellow]Warning: Invalid temperature value '{temperature_raw}'. Using default {default_temperature_val}.[/yellow]")
             temperature = default_temperature_val
 
-        reasoning_effort_setting = str(get_config_value("reasoning_effort", default_reasoning_effort_val)).lower()
+        reasoning_effort_setting = str(get_config_value("reasoning_effort", DEFAULT_REASONING_EFFORT)).lower()
         reply_effort_setting = str(get_config_value("reply_effort", default_reply_effort_val)).lower()
 
         # Prepare the user's message for this turn, augmenting it with effort control instructions.
@@ -1419,19 +1432,18 @@ def main():
     parser.add_argument(
         '--noconfirm',
         action='store_true',
-        help='Skip confirmation prompts when using --init.'
+        help='Skip confirmation prompts when using --script.'
     )
     parser.add_argument(
         '--time',
         action='store_true',
-        help='Enable timestamp display in the prompt on startup.'
+        help='Enable timestamp display in the user prompt.'
     )
     args = parser.parse_args()
 
     clear_screen()
     # Get the current model name to display in the welcome panel
-    # Use the imported get_config_value function
-    current_model_name_for_display = get_config_value("model", "gpt-4o") # Default if not found
+    current_model_name_for_display = get_config_value("model", DEFAULT_LITELLM_MODEL)
     # Get context window size for the current model
     # Use imported get_model_context_window
     context_window_size, used_default = get_model_context_window(current_model_name_for_display, return_match_status=True)
@@ -1487,7 +1499,7 @@ def main():
             # and get_config_value, get_model_context_window are imported
             if conversation_history: # Only calculate if there's history
                 try:
-                    current_model_name = get_config_value("model", "gpt-4o") # Get current model
+                    current_model_name = get_config_value("model", DEFAULT_LITELLM_MODEL) # Get current model
                     # Get window size and status if default was used due to no match
                     context_window_size, used_default_window_due_to_no_match = get_model_context_window(current_model_name, return_match_status=True)
 
