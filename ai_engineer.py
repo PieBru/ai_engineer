@@ -1151,7 +1151,6 @@ def _test_single_model_capabilities(model_label: str, model_name_to_test: str, a
     temperature_for_test = 0.1
     start_time = time.time()
 
-    console.print("[yellow]  1. Attempting basic API call...[/yellow]", end="")
     test_messages = [{"role": "user", "content": "Test: Respond with 'ok'."}]
     api_key_name_hint = "API key"
     if api_base_to_test:
@@ -1165,6 +1164,7 @@ def _test_single_model_capabilities(model_label: str, model_name_to_test: str, a
             api_key_name_hint = "OPENROUTER_API_KEY"
 
     api_base_for_call = api_base_to_test # Start with the global/passed base
+    pre_call_notes = [] # List to store notes to print before the "Attempting..." line
 
     # Heuristic to decide if we should override the global api_base for this specific model test.
     # This allows testing direct provider models when the global LITELLM_API_BASE is set
@@ -1172,26 +1172,35 @@ def _test_single_model_capabilities(model_label: str, model_name_to_test: str, a
     if model_name_to_test and api_base_for_call: # Only adjust if a global base is actually set
         provider_from_model_name = model_name_to_test.split('/')[0].lower()
         
+        is_ollama_model = provider_from_model_name.startswith("ollama") # Covers "ollama" and "ollama_chat"
+
         # Known direct provider domains that LiteLLM has good defaults for.
         # Keys are provider prefixes (lowercase), values are parts of their default domain.
         known_direct_providers_domains = {
             "openai": "api.openai.com",
             "anthropic": "api.anthropic.com",
             "deepseek": "api.deepseek.com", # Native DeepSeek API
-            "google": "googleapis.com",    # For Gemini models
+            "google": "googleapis.com",    # For Gemini models (Vertex AI or AI Studio)
             "cohere": "api.cohere.ai",
             "cerebras": "api.cerebras.com" # LiteLLM's default for Cerebras
         }
 
-        if provider_from_model_name in known_direct_providers_domains and \
-           known_direct_providers_domains[provider_from_model_name] not in api_base_for_call.lower():
+        if is_ollama_model:
+            # If it's an Ollama model, and the global api_base is NOT an Ollama-like URL (typically http://localhost...),
+            # then set api_base_for_call to None to let LiteLLM use OLLAMA_API_BASE env var or its default.
+            # Check if the global base is NOT http or NOT localhost/127.0.0.1
+            if not api_base_for_call.lower().startswith("http://") or \
+               not ("localhost" in api_base_for_call.lower() or "127.0.0.1" in api_base_for_call.lower()):
+                api_base_for_call = None
+                console.print(f"[dim]  (Note: Testing Ollama model '{model_name_to_test}' with LiteLLM's default Ollama endpoint resolution, not global '{api_base_to_test}')[/dim]")
+        elif provider_from_model_name in known_direct_providers_domains and \
+             known_direct_providers_domains[provider_from_model_name] not in api_base_for_call.lower():
             if provider_from_model_name == "google":
                 api_base_for_call = "https://generativelanguage.googleapis.com"
                 console.print(f"[dim]  (Note: Testing '{model_name_to_test}' with explicit Google API base: '{api_base_for_call}')[/dim]")
             else:
                 # For other direct providers, let LiteLLM use its default by setting api_base to None
                 api_base_for_call = None
-                console.print(f"[dim]  (Note: Testing '{model_name_to_test}' with its provider's default API base, not global '{api_base_to_test}')[/dim]")
 
     if "gemini" in model_name_to_test.lower() or "google" in model_name_to_test.lower() : # Broaden check for Gemini
         console.print(f"[bold yellow blink]DEBUG Gemini Test Params:[/bold yellow blink] model='{model_name_to_test}', api_base_for_call='{api_base_for_call}'")
