@@ -59,25 +59,25 @@ MODEL_CONFIGURATIONS: Dict[str, Dict[str, Any]] = {
         "thinking_type": "qwen"
     },
    "ollama_chat/qwen2.5-coder:3b": {
-        "context_window": 40000,
+        "context_window": 32768,
         "supports_tools": False,
         "is_thinking_model": True,
         "thinking_type": "qwen"  # Use <think> ... </think>
     },
    "ollama_chat/qwen2.5-coder:7b": {
-        "context_window": 40000,
+        "context_window": 131072,
         "supports_tools": False,
         "is_thinking_model": True,
         "thinking_type": "qwen"  # Use <think> ... </think>
     },
    "ollama_chat/qwen2.5-coder:14b": {
-        "context_window": 40000,
+        "context_window": 131072,
         "supports_tools": False,
         "is_thinking_model": True,
         "thinking_type": "qwen"  # Use <think> ... </think>
     },
    "ollama_chat/qwen2.5-coder:32b": {  # https://qwenlm.github.io/blog/qwen2.5-coder-family/
-        "context_window": 40000,
+        "context_window": 131072,
         "supports_tools": False,
         "is_thinking_model": True,
         "thinking_type": "qwen"  # Use <think> ... </think>
