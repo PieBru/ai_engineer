@@ -954,13 +954,33 @@ def test_inference_endpoint(specific_model_name: str = None):
     total_context_unknown_or_error = sum(1 for res in all_results if res.get("context_kb", "N/A") in ["N/A", "Error"])
 
     summary_table.add_section()
+
+    # Build available string
+    available_parts = []
+    if total_available_y > 0:
+        available_parts.append(f"[bold green]{total_available_y}Y[/bold green]")
+    if total_available_n > 0:
+        available_parts.append(f"[bold red]{total_available_n}N[/bold red]")
+    available_str = " / ".join(available_parts) if available_parts else ""
+
+    tool_support_str = f"[bold green]{total_tool_support_y}Y[/bold green]" if total_tool_support_y > 0 else ""
+    thinking_str = f"[bold green]{total_thinking_y}Y[/bold green]" if total_thinking_y > 0 else ""
+
+    # Build context string
+    context_parts = []
+    if total_context_known > 0:
+        context_parts.append(f"[bold green]{total_context_known}✓[/bold green]")
+    if total_context_unknown_or_error > 0:
+        context_parts.append(f"[bold red]{total_context_unknown_or_error}?[/bold red]")
+    context_str = " / ".join(context_parts) if context_parts else ""
+
     overall_stats_row_data = [
         "[bold]Overall Stats[/bold]",
         f"[dim]{total_models_tested} models tested[/dim]",
-        f"[bold green]{total_available_y}Y[/bold green] / [bold red]{total_available_n}N[/bold red]", 
-        f"[bold green]{total_tool_support_y}Y[/bold green]",
-        f"[bold green]{total_thinking_y}Y[/bold green]",
-        f"[bold green]{total_context_known}✓[/bold green] / [bold red]{total_context_unknown_or_error}?[/bold red]", 
+        available_str,
+        tool_support_str,
+        thinking_str,
+        context_str,
         "", # Changed from "N/A" to empty string for Time (s) in overall stats
     ]
     if SHOW_TEST_INFERENCE_NOTES_ERRORS_COLUMN:

@@ -187,7 +187,7 @@ def stream_llm_response(
             "content": augmented_user_message_content
         })
 
-        console.print("\n[bold bright_blue]🐋 Seeking...[/bold bright_blue]")
+        console.print("\n[bold bright_blue]🔍 Seeking...[/bold bright_blue]")
         reasoning_content_accumulated = ""
         final_content = ""
         tool_calls = []
