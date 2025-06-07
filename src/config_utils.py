@@ -5,14 +5,14 @@ from typing import Dict, Any, Union, Tuple, Optional
 from dotenv import load_dotenv
 
 # Default LiteLLM configuration values - LITELLM_MODEL serves as LITELLM_MODEL_DEFAULT
-DEFAULT_LITELLM_MODEL = "deepseek/deepseek-chat"
-DEFAULT_LITELLM_API_BASE = "https://api.deepseek.com/v1"
+DEFAULT_LITELLM_MODEL = "ollama_chat/deepcoder:14b-preview-q8_0"
+DEFAULT_LITELLM_API_BASE = "http://localhost:11434"
 DEFAULT_LITELLM_MAX_TOKENS = 8192  # For models which context window size is unknown
 
 # Defaults for specialized models. Users should override these via .env for optimal use.
 DEFAULT_LITELLM_MODEL_ROUTING = "ollama_chat/gemma3:4b-it-qat" # Often a smaller, faster model
-DEFAULT_LITELLM_MODEL_TOOLS = "deepseek/deepseek-chat" # By default, tools model is same as default
-DEFAULT_LITELLM_MODEL_CODING = "deepseek/deepseek-coder" # Specialized coding model, also "deepseek/deepseek-reasoner" (SOTA 2025, slower, more expensive)
+DEFAULT_LITELLM_MODEL_TOOLS = "ollama_chat/deepcoder:14b-preview-q8_0" # By default, tools model is same as default
+DEFAULT_LITELLM_MODEL_CODING = "ollama_chat/deepcoder:14b-preview-q8_0" # Specialized coding model, also "deepseek/deepseek-reasoner" (SOTA 2025, slower, more expensive)
 DEFAULT_LITELLM_MODEL_KNOWLEDGE = "ollama_chat/gemma3:27b-it-qat" # For general knowledge, summarization
 
 # Default UI and Reasoning configuration values
@@ -47,6 +47,21 @@ MODEL_CONFIGURATIONS: Dict[str, Dict[str, Any]] = {
     #     "thinking_type": "qwen"
     # },
 
+    # To do
+    # "ollama_chat/mistral-small3.1:latest"
+    # "ollama_chat/codestral:22b-v0.1-q5_K_S"
+    # "openrouter/meta-llama/llama-4-scout:free"
+    # "openrouter/meta-llama/llama-4-maverick:free"
+    # "ollama_chat/phi4:14b-q8_0"
+    # "ollama_chat/phi4-mini:3.8b-q8_0"
+    # "ollama_chat/phi4-reasoning:latest"
+    # "ollama_chat/THUDM_GLM-4-32B-0414-Q5_K_M.gguf:latest"
+    # "cerebras/llama-4-scout-17b-16e-instruct"
+    # "gemini/gemini-2.0-flash": 128000,  # Assuming a large context for a Flash model
+    # "gemini/gemini-2.0-pro": 256000,    # Assuming a very large context for a Pro model
+    # "gemini/gemini-2.5-flash": 128000,  # Assuming similar to 2.0 Flash or potentially larger
+    # "gemini/gemini-2.5-pro": 1048576,   # Assuming it matches or aims for Gemini 1.5 Pro's scale
+
     "ollama_chat/devstral": {  # https://mistral.ai/news/devstral
         "context_window": 131072,
         "supports_tools": False,
@@ -61,26 +76,22 @@ MODEL_CONFIGURATIONS: Dict[str, Dict[str, Any]] = {
    "ollama_chat/qwen2.5-coder:3b": {
         "context_window": 32768,
         "supports_tools": False,
-        "is_thinking_model": True,
-        "thinking_type": "qwen"  # Use <think> ... </think>
+        "is_thinking_model": False
     },
    "ollama_chat/qwen2.5-coder:7b": {
         "context_window": 131072,
         "supports_tools": False,
-        "is_thinking_model": True,
-        "thinking_type": "qwen"  # Use <think> ... </think>
+        "is_thinking_model": False
     },
    "ollama_chat/qwen2.5-coder:14b": {
         "context_window": 131072,
         "supports_tools": False,
-        "is_thinking_model": True,
-        "thinking_type": "qwen"  # Use <think> ... </think>
+        "is_thinking_model": False
     },
    "ollama_chat/qwen2.5-coder:32b": {  # https://qwenlm.github.io/blog/qwen2.5-coder-family/
         "context_window": 131072,
         "supports_tools": False,
-        "is_thinking_model": True,
-        "thinking_type": "qwen"  # Use <think> ... </think>
+        "is_thinking_model": False
     },
     "ollama_chat/qwen3:0.6b": {
         "context_window": 40000,
@@ -150,21 +161,22 @@ MODEL_CONFIGURATIONS: Dict[str, Dict[str, Any]] = {
         "is_thinking_model": True,
         "thinking_type": "qwen"
     },
-    "deepseek/deepseek-chat": {
-        "context_window": 128000,
-        "supports_tools": True,
-        "is_thinking_model": False,
-    },
-    "deepseek/deepseek-reasoner": {
-        "context_window": 128000,
-        "supports_tools": True,
-        "is_thinking_model": False, # Reasons internally, does not show <think>
-    },
-    "deepseek/deepseek-coder": {
-        "context_window": 128000,
-        "supports_tools": True,
-        "is_thinking_model": False,
-    },
+
+    #"deepseek/deepseek-chat": {
+    #    "context_window": 128000,
+    #    "supports_tools": True,
+    #    "is_thinking_model": False,
+    #},
+    #"deepseek/deepseek-reasoner": {
+    #    "context_window": 128000,
+    #    "supports_tools": True,
+    #    "is_thinking_model": False, # Reasons internally, does not show <think>
+    #},
+    #"deepseek/deepseek-coder": {
+    #    "context_window": 128000,
+    #    "supports_tools": True,
+    #    "is_thinking_model": False,
+    #},
 
     # Add other models here with their specific configurations
     # OpenRouter Examples (FIXME: Update with actuals and expectations)
