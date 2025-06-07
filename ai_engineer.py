@@ -1193,7 +1193,7 @@ def _test_single_model_capabilities(model_label: str, model_name_to_test: str, a
             if not api_base_for_call.lower().startswith("http://") or \
                not ("localhost" in api_base_for_call.lower() or "127.0.0.1" in api_base_for_call.lower()):
                 api_base_for_call = None
-                pre_call_notes.append(f"[dim]  (Note: Testing Ollama model '{model_name_to_test}' with LiteLLM's default Ollama endpoint resolution, not global '{api_base_to_test}')[/dim]")
+                # pre_call_notes.append(f"[dim]  (Note: Testing Ollama model '{model_name_to_test}' with LiteLLM's default Ollama endpoint resolution, not global '{api_base_to_test}')[/dim]")
         elif provider_from_model_name in known_direct_providers_domains and \
              known_direct_providers_domains[provider_from_model_name] not in api_base_for_call.lower():
             if provider_from_model_name == "google":
@@ -1202,7 +1202,6 @@ def _test_single_model_capabilities(model_label: str, model_name_to_test: str, a
             else:
                 # For other direct providers, let LiteLLM use its default by setting api_base to None
                 api_base_for_call = None
-                # Note removed as per user request: pre_call_notes.append(f"[dim]  (Note: Testing '{model_name_to_test}' with its provider's default API base, not global '{api_base_to_test}')[/dim]")
 
     if "gemini" in model_name_to_test.lower() or "google" in model_name_to_test.lower() : # Broaden check for Gemini
         pre_call_notes.append(f"[bold yellow blink]DEBUG Gemini Test Params:[/bold yellow blink] model='{model_name_to_test}', api_base_for_call='{api_base_for_call}'")
