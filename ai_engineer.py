@@ -7,6 +7,81 @@ leveraging AI's reasoning models for intelligent file operations,
 code analysis, and development assistance via natural conversation and function calling.
 """
 
+# --- BEGIN VIRTUAL ENVIRONMENT CHECK ---
+import os
+import sys
+
+_VENV_DIR_NAME = ".venv" # Standard venv directory name
+
+# Common paths for activate scripts relative to the venv directory
+_ACTIVATE_SCRIPTS_INFO = {
+    "posix": {
+        "path": os.path.join(_VENV_DIR_NAME, "bin", "activate"),
+        "command": f"source {_VENV_DIR_NAME}/bin/activate"
+    },
+    "windows_cmd": {
+        "path": os.path.join(_VENV_DIR_NAME, "Scripts", "activate.bat"),
+        "command": f"{_VENV_DIR_NAME}\\Scripts\\activate.bat"
+    },
+    "windows_ps": {
+        "path": os.path.join(_VENV_DIR_NAME, "Scripts", "Activate.ps1"),
+        "command": f".\\{_VENV_DIR_NAME}\\Scripts\\Activate.ps1"
+    }
+}
+
+if os.getenv("VIRTUAL_ENV") is None: # Check if VIRTUAL_ENV is not set
+    # Check if a venv directory exists and any of its activate scripts are present
+    venv_dir_exists = os.path.isdir(_VENV_DIR_NAME)
+    activate_script_found_for_warning = False
+
+    if venv_dir_exists:
+        for _, script_info in _ACTIVATE_SCRIPTS_INFO.items():
+            if os.path.exists(script_info["path"]):
+                activate_script_found_for_warning = True
+                break
+    
+    if activate_script_found_for_warning: # If a venv dir and an activate script were found
+        try:
+            from rich.console import Console as RichConsole
+            from rich.panel import Panel as RichPanel
+            from rich.prompt import Confirm as RichConfirm
+            
+            _error_console = RichConsole(stderr=True) # Print to stderr for warnings
+            _error_console.print(RichPanel(
+                f"[bold yellow]Warning: A virtual environment '[cyan]{_VENV_DIR_NAME}[/cyan]' was detected, but it's not active.[/bold yellow]\n\n"
+                f"This program likely requires dependencies from this virtual environment.\n"
+                f"To ensure correct operation, please activate it first:\n\n"
+                f"  [bold]POSIX (Linux/macOS Bash/Zsh):[/bold] [green]{_ACTIVATE_SCRIPTS_INFO['posix']['command']}[/green]\n"
+                f"  [bold]Windows CMD:[/bold]               [green]{_ACTIVATE_SCRIPTS_INFO['windows_cmd']['command']}[/green]\n"
+                f"  [bold]Windows PowerShell:[/bold]       [green]{_ACTIVATE_SCRIPTS_INFO['windows_ps']['command']}[/green]\n\n"
+                f"Then, re-run the program.\n\n"
+                f"[dim]Continuing without activation may lead to errors if dependencies are missing globally.[/dim]",
+                title="[bold red]Virtual Environment Not Active[/bold red]",
+                border_style="red",
+                padding=(1, 2)
+            ))
+            if not RichConfirm.ask("Continue without activating the virtual environment?", default=False, console=_error_console):
+                _error_console.print("[yellow]Exiting. Please activate the virtual environment and re-run.[/yellow]")
+                sys.exit(1)
+        except ImportError: # Fallback if rich or its components are not available
+            sys.stderr.write("--------------------------------------------------------------------\n"
+                             "WARNING: Virtual Environment Not Active\n"
+                             "--------------------------------------------------------------------\n"
+                             f"A virtual environment '{_VENV_DIR_NAME}' was detected, but it's not active.\n"
+                             "This program likely requires dependencies from this virtual environment.\n"
+                             "Please activate it first. Common commands:\n"
+                             f"  POSIX (Linux/macOS Bash/Zsh): {_ACTIVATE_SCRIPTS_INFO['posix']['command']}\n"
+                             f"  Windows CMD:                {_ACTIVATE_SCRIPTS_INFO['windows_cmd']['command']}\n"
+                             f"  Windows PowerShell:         {_ACTIVATE_SCRIPTS_INFO['windows_ps']['command']}\n"
+                             "Then, re-run the program.\n\n")
+            user_choice = input("Continue without activating? (yes/No): ").strip().lower()
+            if user_choice not in ["y", "yes"]:
+                sys.stderr.write("Exiting. Please activate the virtual environment and re-run.\n")
+                sys.exit(1)
+            sys.stderr.write("Continuing without virtual environment. You may encounter errors.\n"
+                             "--------------------------------------------------------------------\n\n")
+# --- END VIRTUAL ENVIRONMENT CHECK ---
+
 # Import default constants from config_utils first
 from src.config_utils import (
     DEFAULT_LITELLM_MODEL,
@@ -28,7 +103,6 @@ from src.config_utils import (
 )
 
 # Now, define module-level configurations using these defaults
-import os
 LITELLM_MODEL = os.getenv("LITELLM_MODEL", DEFAULT_LITELLM_MODEL)
 LITELLM_MODEL_DEFAULT = LITELLM_MODEL # Alias for clarity, LITELLM_MODEL is the default
 LITELLM_MODEL_ROUTING = os.getenv("LITELLM_MODEL_ROUTING", DEFAULT_LITELLM_MODEL_ROUTING)
@@ -1189,6 +1263,28 @@ def clear_screen():
         _ = os.system('clear')
 
 def main():
+    # Check for inactive .venv at the very start
+    # Ensure console is available for printing the message
+    # This check should ideally be one of the first things
+    venv_path = ".venv"
+    # Standard path for activate script in sh/bash/zsh compatible venvs
+    activate_script_path = os.path.join(venv_path, "bin", "activate")
+
+    if os.getenv("VIRTUAL_ENV") is None:  # Check if VIRTUAL_ENV is not set
+        if os.path.isdir(venv_path) and os.path.exists(activate_script_path):
+            console.print(Panel(
+                f"[bold yellow]Warning: A virtual environment '[cyan]{venv_path}[/cyan]' was detected in the current directory, "
+                f"but it does not seem to be active.[/bold yellow]\n\n"
+                f"This program likely requires dependencies installed within this virtual environment for optimal operation.\n"
+                f"To ensure all dependencies are correctly loaded, please activate it by running:\n\n"
+                f"  [bold green]source {activate_script_path}[/bold green]\n\n"
+                f"Then, re-run the program.\n\n"
+                f"[dim]You can choose to continue, but you might encounter errors if dependencies are missing from your global Python environment.[/dim]",
+                title="[bold red]Virtual Environment Not Active[/bold red]",
+                border_style="red",
+                padding=(1, 2)
+            ))
+            prompt_session.prompt("Press Enter to continue without activating, or Ctrl+C to exit and activate manually...")
     parser = argparse.ArgumentParser(
         description="Software Engineer AI Assistant: An AI-powered coding assistant.",
         formatter_class=argparse.RawTextHelpFormatter
