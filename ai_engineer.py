@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AI Engineer: An AI-powered coding assistant.
+Software Engineer AI Assistant: An AI-powered coding assistant.
 
 This script provides an interactive terminal interface for code development,
 leveraging AI's reasoning models for intelligent file operations,
@@ -202,22 +202,117 @@ def try_handle_set_command(user_input: str) -> bool:
 
 def try_handle_help_command(user_input: str) -> bool:
     command_prefix = "/help"
-    if user_input.strip().lower() == command_prefix:
-        help_file_path = Path(__file__).parent / "ai_engineer_help.md"
+    stripped_input = user_input.strip() # Keep original case for argument processing
+
+    if not stripped_input.lower().startswith(command_prefix.lower()): # Case-insensitive command check
+        return False
+
+    # Extract argument part, keeping its original form for now
+    # e.g., "/help foo bar " -> arg_text = "foo bar"
+    # e.g., "/help" -> arg_text = ""
+    arg_text = stripped_input[len(command_prefix):].strip()
+
+    help_file_basename = "help" # Default base name for the .md file (e.g., "help.md")
+
+    if arg_text:
+        # Sanitize argument: keep alphanumeric, '_', '-', '.'
+        # Example: "/task" -> "task", "my topic" -> "mytopic", "valid_file-1.0" -> "valid_file-1.0"
+        sanitized_arg_basename = "".join(c for c in arg_text if c.isalnum() or c in ['_', '-', '.'])
+        if sanitized_arg_basename: # If something remains after sanitization
+            help_file_basename = sanitized_arg_basename
+        else:
+            # If arg_text was provided but sanitized_arg_basename is empty (e.g., arg_text was "///" or "$%^")
+            console.print(f"[yellow]Warning: Invalid characters in help topic '{arg_text}'. Showing default help page.[/yellow]")
+            # help_file_basename remains "help" (the default)
+    
+    help_file_name_md = f"{help_file_basename}.md"
+    default_help_file_name_md = "help.md"
+
+    script_dir = Path(__file__).resolve().parent
+    script_help_dir = script_dir / "help"
+    
+    # Path for current working directory's help folder
+    cwd_help_dir = Path("./help").resolve() 
+
+    # Paths to try for the requested/default help topic
+    requested_script_path = script_help_dir / help_file_name_md
+    requested_cwd_path = cwd_help_dir / help_file_name_md
+
+    # Paths for the main/default help.md file
+    default_script_path = script_help_dir / default_help_file_name_md
+    default_cwd_path = cwd_help_dir / default_help_file_name_md
+
+    help_content = None
+    loaded_from_cwd = False
+    is_default_fallback = False
+
+    # Attempt 1: Load requested file from script directory
+    try:
+        help_content = util_read_local_file(str(requested_script_path))
+    except FileNotFoundError:
+        # Attempt 2: Load requested file from CWD
         try:
-            help_content = util_read_local_file(str(help_file_path))
-            console.print(Panel(
-                RichMarkdown(help_content),
-                title="[bold blue]📚 AI Engineer Help[/bold blue]",
-                title_align="left",
-                border_style="blue"
-            ))
+            help_content = util_read_local_file(str(requested_cwd_path))
+            loaded_from_cwd = True
+            console.print(f"[dim]Info: Help file '{help_file_name_md}' loaded from CWD ('{requested_cwd_path}').[/dim]")
         except FileNotFoundError:
-            console.print(f"[red]Error: Help file not found at '{help_file_path}'[/red]")
-        except OSError as e:
-            console.print(f"[red]Error reading help file: {e}[/red]")
+            # Requested file not found in either location
+            if help_file_basename.lower() != "help": # If it was a specific topic, try default help
+                console.print(f"[red]Error: Help topic '{arg_text}' (file '{help_file_name_md}') not found in script directory ('{requested_script_path}') or CWD ('{requested_cwd_path}'). Attempting to show default help page.[/red]")
+                is_default_fallback = True
+                # Attempt 3: Load default help.md from script directory
+                try:
+                    help_content = util_read_local_file(str(default_script_path))
+                    loaded_from_cwd = False # Reset as this is from script dir
+                except FileNotFoundError:
+                    # Attempt 4: Load default help.md from CWD
+                    try:
+                        help_content = util_read_local_file(str(default_cwd_path))
+                        loaded_from_cwd = True
+                        console.print(f"[dim]Info: Default help file '{default_help_file_name_md}' loaded from CWD ('{default_cwd_path}').[/dim]")
+                    except FileNotFoundError:
+                        console.print(f"[red]Error: Default help file ('{default_help_file_name_md}') also not found in script directory ('{default_script_path}') or CWD ('{default_cwd_path}').[/red]")
+                        return True # Command handled, error shown
+                    except OSError as e_default_cwd:
+                        console.print(f"[red]Error reading default help file from CWD '{default_cwd_path}': {e_default_cwd}[/red]")
+                        return True
+                except OSError as e_default_script:
+                    console.print(f"[red]Error reading default help file from script dir '{default_script_path}': {e_default_script}[/red]")
+                    return True
+            else: # Main help.md itself was not found
+                console.print(f"[red]Error: Main help file ('{help_file_name_md}') not found in script directory ('{requested_script_path}') or CWD ('{requested_cwd_path}').[/red]")
+                return True # Command handled, error shown
+        except OSError as e_cwd:
+            console.print(f"[red]Error reading help file from CWD '{requested_cwd_path}': {e_cwd}[/red]")
+            return True
+    except OSError as e_script:
+        console.print(f"[red]Error reading help file from script dir '{requested_script_path}': {e_script}[/red]")
         return True
-    return False
+
+    if help_content:
+        # Determine panel title
+        title_base_name_for_display = help_file_basename
+        if is_default_fallback: # If we are showing help.md because the original topic wasn't found
+            title_base_name_for_display = "Default" 
+
+        title_location_suffix = " (from CWD)" if loaded_from_cwd else ""
+        
+        if help_file_basename.lower() == "help" and not is_default_fallback:
+            # User asked for /help, and we found help.md (not as a fallback for another topic)
+            panel_title = f"[bold blue]📚 Software Engineer AI Assistant Help{title_location_suffix}[/bold blue]"
+        else:
+            # User asked for /help <topic> and we found <topic>.md
+            # OR user asked for /help <topic>, <topic>.md not found, so we are showing help.md (Default)
+            panel_title = f"[bold blue]📚 Software Engineer AI Assistant Help ({title_base_name_for_display}){title_location_suffix}[/bold blue]"
+            
+        console.print(Panel(
+            RichMarkdown(help_content),
+            title=panel_title,
+            title_align="left",
+            border_style="blue"
+        ))
+    
+    return True # Command was handled (or attempted)
 
 def try_handle_shell_command(user_input: str) -> bool:
     command_prefix = "/shell"
@@ -499,13 +594,13 @@ def _call_llm_for_prompt_generation(user_text: str, mode: str) -> str:
     console.print(f"[bold bright_blue]⚙️ Processing text for prompt {mode}ing...[/bold bright_blue]")
     if mode == "refine":
         meta_system_prompt = dedent("""\
-            You are a prompt engineering assistant. Your task is to refine the following user-provided text into an optimized prompt suitable for an AI coding assistant like AI Engineer. The refined prompt should be clear, concise, and actionable, guiding the AI to provide the best possible coding assistance.
+            You are a prompt engineering assistant. Your task is to refine the following user-provided text into an optimized prompt suitable for an AI coding assistant like Software Engineer AI Assistant. The refined prompt should be clear, concise, and actionable, guiding the AI to provide the best possible coding assistance.
             The output should be ONLY the refined prompt text, without any preamble or explanation.
             """)
         user_query = f"Refine this text into a prompt for an AI coding assistant:\n\n---\n{user_text}\n---"
     elif mode == "detail":
         meta_system_prompt = dedent("""\
-            You are a prompt engineering assistant. Your task is to expand the following user-provided text into a more detailed and comprehensive prompt suitable for an AI coding assistant like AI Engineer. The detailed prompt should elaborate on the user's initial idea, adding necessary context, specifying desired outcomes, and anticipating potential ambiguities to guide the AI effectively.
+            You are a prompt engineering assistant. Your task is to expand the following user-provided text into a more detailed and comprehensive prompt suitable for an AI coding assistant like Software Engineer AI Assistant. The detailed prompt should elaborate on the user's initial idea, adding necessary context, specifying desired outcomes, and anticipating potential ambiguities to guide the AI effectively.
             The output should be ONLY the detailed prompt text, without any preamble or explanation.
             """)
         user_query = f"Expand this text into a detailed prompt for an AI coding assistant:\n\n---\n{user_text}\n---"
@@ -555,8 +650,8 @@ def try_handle_prompt_command(user_input: str) -> bool:
             console.print(Panel(generated_prompt, border_style="green", expand=True, title_align="left"))
         return True
     console.print("[yellow]Usage: /prompt <refine|detail> <text>[/yellow]")
-    console.print("[yellow]  refine <text>  - Optimizes <text> into a clearer and more effective prompt for AI Engineer.[/yellow]")
-    console.print("[yellow]  detail <text>  - Expands <text> into a more comprehensive and detailed prompt for AI Engineer.[/yellow]")
+    console.print("[yellow]  refine <text>  - Optimizes <text> into a clearer and more effective prompt for Software Engineer AI Assistant.[/yellow]")
+    console.print("[yellow]  detail <text>  - Expands <text> into a more comprehensive and detailed prompt for Software Engineer AI Assistant.[/yellow]")
     return True
 
 # --------------------------------------------------------------------------------
@@ -1006,7 +1101,7 @@ def clear_screen():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="AI Engineer: An AI-powered coding assistant.",
+        description="Software Engineer AI Assistant: An AI-powered coding assistant.",
         formatter_class=argparse.RawTextHelpFormatter
     )
     parser.add_argument(
@@ -1050,14 +1145,16 @@ def main():
     # Use get_model_context_window for display, as it's simpler for this purpose
     context_window_size_display, used_default_display = get_model_context_window(current_model_name_for_display, return_match_status=True)
     context_window_display_str = f"{context_window_size_display // 1000}k tokens"
+    current_working_directory = os.getcwd()
     if used_default_display:
         context_window_display_str += " (default)"
         
     instructions = f"""🧠 Default Model: [bold magenta]{current_model_name_for_display}[/bold magenta] ([dim]{context_window_display_str}[/dim])
    Routing: [dim]{LITELLM_MODEL_ROUTING or 'Not Set'}[/dim] | Tools: [dim]{LITELLM_MODEL_TOOLS or 'Not Set'}[/dim]
    Coding: [dim]{LITELLM_MODEL_CODING or 'Not Set'}[/dim] | Knowledge: [dim]{LITELLM_MODEL_KNOWLEDGE or 'Not Set'}[/dim]
+   📁 Current Directory: [bold green]{current_working_directory}[/bold green]
 
-[bold bright_blue]🎯 Commands:[/bold bright_blue]
+[bold bright_blue]▶️ Commands:[/bold bright_blue]
   • [bright_cyan]/exit[/bright_cyan] or [bright_cyan]/quit[/bright_cyan] - End the session.
   • [bright_cyan]/help[/bright_cyan] - Display detailed help.
 
@@ -1066,7 +1163,7 @@ def main():
         instructions,
         border_style="blue",
         padding=(1, 2),
-        title="[bold blue]🤖 AI Code Assistant (Multi-Model)[/bold blue]",
+        title="[bold blue]🎯 Software Engineer AI Assistant[/bold blue]",
         title_align="left"
     ))
     console.print()
@@ -1135,7 +1232,7 @@ def main():
 
         # Call with all necessary arguments
         stream_llm_response(user_input, conversation_history, console, prompt_session)
-    console.print("[bold blue]✨ Session finished. Thank you for using AI Engineer![/bold blue]")
+    console.print("[bold blue]✨ Session finished. Thank you for using Software Engineer AI Assistant![/bold blue]")
     sys.exit(0)
 
 def execute_script_line(line: str):
@@ -1167,7 +1264,7 @@ def try_handle_script_command(user_input: str, is_startup_script: bool = False) 
     if not script_path_arg:
         console.print("[yellow]Usage: /script <script_path>[/yellow]")
         console.print("[yellow]  Example: /script ./my_setup_script.aiescript[/yellow]")
-        console.print("[yellow]  The script file contains AI Engineer commands, one per line. Lines starting with '#' are comments.[/yellow]")
+        console.print("[yellow]  The script file contains Software Engineer AI Assistant commands, one per line. Lines starting with '#' are comments.[/yellow]")
         return True
     try:
         normalized_script_path = normalize_path(script_path_arg)

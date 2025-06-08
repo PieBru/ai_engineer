@@ -1,5 +1,5 @@
 """
-Unit tests for the AI Engineer (ai_eng.py) script.
+Unit tests for the Software Engineer AI Assistant (ai_eng.py) script.
 Covers helper functions, command handling, conversation history, tool execution, and LLM interactions.
 """
 import pytest
@@ -714,7 +714,7 @@ class TestHelpCommand:
     @patch('ai_engineer.util_read_local_file')
     @patch('ai_engineer.console.print')
     def test_try_handle_help_command_success(self, mock_console_print, mock_read_file):
-        help_content = "# AI Engineer Help\n\nThis is the help content."
+        help_content = "# Software Engineer AI Assistant Help\n\nThis is the help content."
         mock_read_file.return_value = help_content
         
         handled = de.try_handle_help_command("/help")

@@ -11,8 +11,8 @@ def test_system_prompt_is_not_empty():
     assert len(system_PROMPT.strip()) > 0
 
 def test_system_prompt_mentions_ai_engineer():
-    """Verify that the prompt identifies the AI as 'AI Engineer'."""
-    assert "AI Engineer" in system_PROMPT
+    """Verify that the prompt identifies the AI as 'Software Engineer AI Assistant'."""
+    assert "Software Engineer AI Assistant" in system_PROMPT
     assert "PRIORITIZE CONVERSATIONAL RESPONSES FOR SIMPLE INPUTS, ESPECIALLY GREETINGS." in system_PROMPT
 
 def test_system_prompt_file_operations_tools():

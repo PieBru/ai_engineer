@@ -1,8 +1,8 @@
-# 🦾 AI Engineer
+# 🦾 Software Engineer AI Assistant
 
 ## Overview
 
-AI Engineer v2 is a powerful AI-powered coding assistant that provides an interactive terminal interface for seamless code development. It integrates with AI's advanced reasoning models to offer intelligent file operations, code analysis, and development assistance through natural conversation and function calling.
+Software Engineer AI Assistant v2 is a powerful AI-powered coding assistant that provides an interactive terminal interface for seamless code development. It integrates with AI's advanced reasoning models to offer intelligent file operations, code analysis, and development assistance through natural conversation and function calling.
 
 ## 🚀 Latest Update: Function Calling Architecture
 
@@ -112,9 +112,9 @@ For when you want to preload files into conversation context:
    ```
 
 ### Command-Line Interface (CLI) Options
-AI Engineer supports several command-line options to customize its startup behavior:
+Software Engineer AI Assistant supports several command-line options to customize its startup behavior:
 *   `--version`: Display the application version and exit.
-*   `--script SCRIPT_PATH`: Execute a script file (containing AI Engineer commands, one per line) on startup.
+*   `--script SCRIPT_PATH`: Execute a script file (containing Software Engineer AI Assistant commands, one per line) on startup.
 *   `--noconfirm`: Skip confirmation prompts when using `--script`.
 *   `--time`: Enable timestamp display in the user prompt from the start.
 *   `--test-inference [MODEL_PATTERN]`: Test capabilities. If `MODEL_PATTERN` (wildcards `*` and `?` supported) is provided, tests matching models. Otherwise, tests all models from `MODEL_CONTEXT_WINDOWS` and configured roles. Exits after testing.
@@ -223,7 +223,7 @@ Configuration is primarily managed through environment variables. If an environm
     *   `/test inference [model_pattern]`: Performs capability tests. If `model_pattern` (wildcards `*` and `?` supported) is provided, tests matching models. Otherwise, performs the same comprehensive checks as the `--test-inference` CLI option (when no pattern is provided), testing all known/configured models.
 
 ### **High-Level Architecture**
-The following diagram illustrates the main components and their interactions within AI Engineer:
+The following diagram illustrates the main components and their interactions within Software Engineer AI Assistant:
 
 ```mermaid
 flowchart TD
@@ -424,9 +424,9 @@ python mock_mcp_server.py
 ```
 The mock server will start, typically on http://localhost:1957.
 
-3. Run AI Engineer:
+3. Run Software Engineer AI Assistant:
 
-In another terminal, run the AI Engineer application:
+In another terminal, run the Software Engineer AI Assistant application:
 ```bash
 Using uv (from project root)
 uv run ai_eng.py
@@ -434,7 +434,7 @@ Or using python
 python ai_eng.py
 ```
 
-4. Test with prompts in AI Engineer:
+4. Test with prompts in Software Engineer AI Assistant:
 
 Interact with the AI using prompts like these:
 ```
