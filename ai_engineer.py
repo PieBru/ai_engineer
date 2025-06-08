@@ -716,10 +716,10 @@ def summarize_context():
 
     try:
         if DEBUG_LLM_INTERACTIONS:
-            console.print(f"[dim bold red]SUMMARY DEBUG: Request Params ({model_name}):[/dim bold red]", stderr=True)
+            Console(stderr=True).print(f"[dim bold red]SUMMARY DEBUG: Request Params ({model_name}):[/dim bold red]")
             debug_summary_params_log = completion_args_summary.copy()
             if "messages" in debug_summary_params_log:
-                console.print(f"[dim bold red]SUMMARY DEBUG: Request Messages (detail):[/dim bold red]", stderr=True)
+                Console(stderr=True).print(f"[dim bold red]SUMMARY DEBUG: Request Messages (detail):[/dim bold red]")
                 messages_to_log = []
                 # Log system, user instruction, a note about history, and last history message
                 if len(debug_summary_params_log["messages"]) > 3:
@@ -730,21 +730,21 @@ def summarize_context():
                 else:
                     messages_to_log = debug_summary_params_log["messages"]
                 for i, msg in enumerate(messages_to_log):
-                    console.print(f"[dim red]Message {i}: {json.dumps(msg, indent=2, default=str)}[/dim red]", stderr=True)
+                    Console(stderr=True).print(f"[dim red]Message {i}: {json.dumps(msg, indent=2, default=str)}[/dim red]")
                 del debug_summary_params_log["messages"] # Avoid re-printing in main JSON
-            console.print(RichJSON(json.dumps(debug_summary_params_log, indent=2, default=str)), stderr=True)
+            Console(stderr=True).print(RichJSON(json.dumps(debug_summary_params_log, indent=2, default=str)))
 
         response = completion(**completion_args_summary) # Use the dict
 
         if DEBUG_LLM_INTERACTIONS:
-            console.print(f"[dim bold red]SUMMARY DEBUG: Raw Response ({model_name}):[/dim bold red]", stderr=True)
+            Console(stderr=True).print(f"[dim bold red]SUMMARY DEBUG: Raw Response ({model_name}):[/dim bold red]")
             # Similar response logging as in get_routing_expert_keyword
             try:
                 debug_response_data = {"choices": [{"message": {"content": response.choices[0].message.content}, "finish_reason": response.choices[0].finish_reason}], "model": response.model, "usage": dict(response.usage)}
-                console.print(RichJSON(json.dumps(debug_response_data, indent=2, default=str)), stderr=True)
+                Console(stderr=True).print(RichJSON(json.dumps(debug_response_data, indent=2, default=str)))
             except Exception as e_debug:
-                console.print(f"[dim red]SUMMARY DEBUG: Error serializing response: {e_debug}[/dim red]", stderr=True)
-                console.print(f"[dim red]{response}[/dim red]", stderr=True)
+                Console(stderr=True).print(f"[dim red]SUMMARY DEBUG: Error serializing response: {e_debug}[/dim red]")
+                Console(stderr=True).print(f"[dim red]{response}[/dim red]")
 
         summary_content = response.choices[0].message.content
         if summary_content:
@@ -761,7 +761,7 @@ def summarize_context():
     except Exception as e:
         console.print(f"[bold red]✗[/bold red] Failed to summarize context: {e}\n")
         if DEBUG_LLM_INTERACTIONS:
-            console.print(f"[dim red]SUMMARY DEBUG: Exception: {e}[/dim red]", stderr=True)
+            Console(stderr=True).print(f"[dim red]SUMMARY DEBUG: Exception: {e}[/dim red]")
 
 
 def _call_llm_for_prompt_generation(user_text: str, mode: str) -> str:
@@ -812,14 +812,14 @@ def _call_llm_for_prompt_generation(user_text: str, mode: str) -> str:
 
     try:
         if DEBUG_LLM_INTERACTIONS:
-            console.print(f"[dim bold red]PROMPT_GEN DEBUG: Request Params ({model_name}):[/dim bold red]", stderr=True)
+            Console(stderr=True).print(f"[dim bold red]PROMPT_GEN DEBUG: Request Params ({model_name}):[/dim bold red]")
             debug_prompt_gen_params_log = completion_args_prompt_gen.copy()
             if "messages" in debug_prompt_gen_params_log: # Messages are short here
-                console.print(f"[dim bold red]PROMPT_GEN DEBUG: Request Messages (detail):[/dim bold red]", stderr=True)
+                Console(stderr=True).print(f"[dim bold red]PROMPT_GEN DEBUG: Request Messages (detail):[/dim bold red]")
                 for i, msg in enumerate(debug_prompt_gen_params_log["messages"]):
-                    console.print(f"[dim red]Message {i}: {json.dumps(msg, indent=2, default=str)}[/dim red]", stderr=True)
+                    Console(stderr=True).print(f"[dim red]Message {i}: {json.dumps(msg, indent=2, default=str)}[/dim red]")
                 del debug_prompt_gen_params_log["messages"] # Avoid re-printing
-            console.print(RichJSON(json.dumps(debug_prompt_gen_params_log, indent=2, default=str)), stderr=True)
+            Console(stderr=True).print(RichJSON(json.dumps(debug_prompt_gen_params_log, indent=2, default=str)))
 
         response = completion(**completion_args_prompt_gen) # Use the dict
         generated_prompt = response.choices[0].message.content.strip()
@@ -827,7 +827,7 @@ def _call_llm_for_prompt_generation(user_text: str, mode: str) -> str:
     except Exception as e:
         console.print(f"[bold red]✗[/bold red] Failed to generate prompt: {e}\n")
         if DEBUG_LLM_INTERACTIONS:
-            console.print(f"[dim red]PROMPT_GEN DEBUG: Exception: {e}[/dim red]", stderr=True)
+            Console(stderr=True).print(f"[dim red]PROMPT_GEN DEBUG: Exception: {e}[/dim red]")
         return ""
 
 def try_handle_prompt_command(user_input: str) -> bool:
@@ -921,16 +921,16 @@ def get_routing_expert_keyword(user_query: str, current_conversation_history: li
         completion_params_routing["api_key"] = "dummy"
 
     if DEBUG_LLM_INTERACTIONS:
-        console.print(f"[dim bold red]ROUTER DEBUG: Request Params:[/dim bold red]", stderr=True)
+        Console(stderr=True).print(f"[dim bold red]ROUTER DEBUG: Request Params:[/dim bold red]")
         # Log messages separately for clarity, as ROUTING_SYSTEM_PROMPT can be long
-        console.print(f"[dim bold red]ROUTER DEBUG: Request Messages (detail):[/dim bold red]", stderr=True)
+        Console(stderr=True).print(f"[dim bold red]ROUTER DEBUG: Request Messages (detail):[/dim bold red]")
         for i, msg in enumerate(completion_params_routing["messages"]):
-            console.print(f"[dim red]Message {i}: {json.dumps(msg, indent=2, default=str)}[/dim red]", stderr=True)
+            Console(stderr=True).print(f"[dim red]Message {i}: {json.dumps(msg, indent=2, default=str)}[/dim red]")
         # Log other params, excluding messages if they were logged separately
         params_to_log_separately = completion_params_routing.copy()
         if "messages" in params_to_log_separately:
             del params_to_log_separately["messages"]
-        console.print(RichJSON(json.dumps(params_to_log_separately, indent=2, default=str)), stderr=True)
+        Console(stderr=True).print(RichJSON(json.dumps(params_to_log_separately, indent=2, default=str)))
 
 
     try:
@@ -940,7 +940,7 @@ def get_routing_expert_keyword(user_query: str, current_conversation_history: li
         final_keyword_candidate = raw_response_content # Default to raw response
 
         if DEBUG_LLM_INTERACTIONS:
-            console.print(f"[dim bold red]ROUTER DEBUG: Raw Response:[/dim bold red]", stderr=True)
+            Console(stderr=True).print(f"[dim bold red]ROUTER DEBUG: Raw Response:[/dim bold red]")
             try:
                 debug_response_data = {
                     "choices": [{
@@ -952,10 +952,10 @@ def get_routing_expert_keyword(user_query: str, current_conversation_history: li
                     "model": response.model,
                     "usage": dict(response.usage) if response.usage else "N/A"
                 }
-                console.print(RichJSON(json.dumps(debug_response_data, indent=2, default=str)), stderr=True)
+                Console(stderr=True).print(RichJSON(json.dumps(debug_response_data, indent=2, default=str)))
             except Exception as e_debug:
-                console.print(f"[dim red]ROUTER DEBUG: Error serializing response for debug: {e_debug}[/dim red]", stderr=True)
-                console.print(f"[dim red]{response}[/dim red]", stderr=True)
+                Console(stderr=True).print(f"[dim red]ROUTER DEBUG: Error serializing response for debug: {e_debug}[/dim red]")
+                Console(stderr=True).print(f"[dim red]{response}[/dim red]")
         # routing_model_expectations is already defined above from resolving api_base
         is_thinking = routing_model_expectations.get("is_thinking_model", False)
         think_type = routing_model_expectations.get("thinking_type")
@@ -1053,7 +1053,7 @@ def get_routing_expert_keyword(user_query: str, current_conversation_history: li
     except Exception as e:
         console_obj.print(f"[red]Error during routing: {e}. Defaulting to DEFAULT expert.[/red]")
         if DEBUG_LLM_INTERACTIONS:
-            console_obj.print(f"[dim red]ROUTER DEBUG: Exception: {e}[/dim red]", stderr=True)
+            Console(stderr=True).print(f"[dim red]ROUTER DEBUG: Exception: {e}[/dim red]")
         return "DEFAULT"
 
 def map_expert_to_model(expert_keyword: str) -> str:
@@ -1104,22 +1104,22 @@ def _summarize_error_message(error_message: str, summary_model_name: str, api_ba
         completion_args_error_sum["api_key"] = "dummy"
         
     try:
-        if DEBUG_LLM_INTERACTIONS: # New
-            console.print(f"[dim bold red]ERROR_SUM DEBUG: Request Params ({summary_model_name}):[/dim bold red]", stderr=True)
+        if DEBUG_LLM_INTERACTIONS:
+            Console(stderr=True).print(f"[dim bold red]ERROR_SUM DEBUG: Request Params ({summary_model_name}):[/dim bold red]")
             debug_error_sum_params_log = completion_args_error_sum.copy()
             if "messages" in debug_error_sum_params_log: # Messages are short here
-                console.print(f"[dim bold red]ERROR_SUM DEBUG: Request Messages (detail):[/dim bold red]", stderr=True)
+                Console(stderr=True).print(f"[dim bold red]ERROR_SUM DEBUG: Request Messages (detail):[/dim bold red]")
                 for i, msg in enumerate(debug_error_sum_params_log["messages"]):
-                    console.print(f"[dim red]Message {i}: {json.dumps(msg, indent=2, default=str)}[/dim red]", stderr=True)
+                    Console(stderr=True).print(f"[dim red]Message {i}: {json.dumps(msg, indent=2, default=str)}[/dim red]")
                 del debug_error_sum_params_log["messages"]
-            console.print(RichJSON(json.dumps(debug_error_sum_params_log, indent=2, default=str)), stderr=True)
+            Console(stderr=True).print(RichJSON(json.dumps(debug_error_sum_params_log, indent=2, default=str)))
 
         response = completion(**completion_args_error_sum) # Use the dict
         summary = response.choices[0].message.content.strip()
         return f"Summary: {summary}" if summary else error_message
     except Exception as e_sum_err:
         if DEBUG_LLM_INTERACTIONS:
-            console.print(f"[dim red]ERROR_SUM DEBUG: Exception: {e_sum_err}[/dim red]", stderr=True)
+            Console(stderr=True).print(f"[dim red]ERROR_SUM DEBUG: Exception: {e_sum_err}[/dim red]")
         return truncated_error_message
 
 def _perform_api_call_for_test(model_name_to_test: str, messages: list, api_base_for_call: Optional[str], temperature: float, max_tokens_val: int, timeout_val: int, completion_kwargs: dict, tools_list: Optional[list] = None) -> Any:
@@ -1143,22 +1143,22 @@ def _perform_api_call_for_test(model_name_to_test: str, messages: list, api_base
     if tools_list:
         call_args["tools"] = tools_list
 
-    if DEBUG_LLM_INTERACTIONS: # New
-        console.print(f"[dim bold red]TEST_INF_CALL DEBUG: Request Params ({model_name_to_test}):[/dim bold red]", stderr=True)
+    if DEBUG_LLM_INTERACTIONS:
+        Console(stderr=True).print(f"[dim bold red]TEST_INF_CALL DEBUG: Request Params ({model_name_to_test}):[/dim bold red]")
         # Create a serializable copy for debugging
         debug_call_args_log = call_args.copy()
         if "messages" in debug_call_args_log: # messages can be short here
-            console.print(f"[dim bold red]TEST_INF_CALL DEBUG: Request Messages (detail):[/dim bold red]", stderr=True)
+            Console(stderr=True).print(f"[dim bold red]TEST_INF_CALL DEBUG: Request Messages (detail):[/dim bold red]")
             for i, msg in enumerate(debug_call_args_log["messages"]):
-                console.print(f"[dim red]Message {i}: {json.dumps(msg, indent=2, default=str)}[/dim red]", stderr=True)
+                Console(stderr=True).print(f"[dim red]Message {i}: {json.dumps(msg, indent=2, default=str)}[/dim red]")
             del debug_call_args_log["messages"] # Avoid re-printing in main JSON
         
         # Log tools separately if they exist
         if "tools" in debug_call_args_log and debug_call_args_log["tools"]:
-            console.print(f"[dim bold red]TEST_INF_CALL DEBUG: Tools Spec (detail):[/dim bold red]", stderr=True)
-            console.print(RichJSON(json.dumps(debug_call_args_log["tools"], indent=2, default=str)), stderr=True)
+            Console(stderr=True).print(f"[dim bold red]TEST_INF_CALL DEBUG: Tools Spec (detail):[/dim bold red]")
+            Console(stderr=True).print(RichJSON(json.dumps(debug_call_args_log["tools"], indent=2, default=str)))
             del debug_call_args_log["tools"]
-        console.print(RichJSON(json.dumps(debug_call_args_log, indent=2, default=str)), stderr=True)
+        Console(stderr=True).print(RichJSON(json.dumps(debug_call_args_log, indent=2, default=str)))
 
     return completion(**call_args)
 
@@ -1734,9 +1734,9 @@ def main():
         if try_handle_prompt_command(user_input): continue
         if try_handle_script_command(user_input): continue
         if try_handle_ask_command(user_input): continue
-        if try_handle_debug_command(user_input): continue # Add this line
+        if try_handle_debug_command(user_input): continue 
         if try_handle_time_command(user_input): continue
-        if try_handle_test_command(user_input): continue # Keep this line
+        if try_handle_test_command(user_input): continue 
 
         # Call with all necessary arguments
         # --- Routing Step ---
@@ -1753,7 +1753,7 @@ def main():
 
             if is_simple_greeting_for_bypass:
                 if DEBUG_LLM_INTERACTIONS:
-                    console.print("[dim]ROUTER DEBUG: Simple greeting detected, bypassing LLM router, using DEFAULT expert.[/dim]", stderr=True)
+                    Console(stderr=True).print("[dim]ROUTER DEBUG: Simple greeting detected, bypassing LLM router, using DEFAULT expert.[/dim]")
                 expert_keyword = "DEFAULT" # Directly assign
                 target_model_for_this_turn = map_expert_to_model(expert_keyword)
                 console.print(f"[dim]   -> Routed to: {expert_keyword} (Bypassed for greeting)[/dim]")

@@ -26,8 +26,8 @@ system_PROMPT = dedent("""\
       ```startLine:endLine:filepath
       // ... existing code ...
       ```
-      Example:
-      ```12:15:app/components/Todo.tsx
+      Example (this is a placeholder path for illustration, do not attempt to read it unless specifically asked by the user):
+      ```12:15:example-app/components/PlaceholderComponent.tsx
       // ... existing code ...
       ```
       - startLine: The starting line number (inclusive)

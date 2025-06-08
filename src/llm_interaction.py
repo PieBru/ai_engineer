@@ -234,10 +234,10 @@ def stream_llm_response(
         }
 
         if debug_llm_interactions_flag:
-            console.print(f"[dim bold red]LLM DEBUG: Request Params ({model_name}):[/dim bold red]", stderr=True)
+            Console(stderr=True).print(f"[dim bold red]LLM DEBUG: Request Params ({model_name}):[/dim bold red]")
             debug_params_log = completion_params.copy()
             if "messages" in debug_params_log:
-                console.print(f"[dim bold red]LLM DEBUG: Request Messages (detail):[/dim bold red]", stderr=True)
+                Console(stderr=True).print(f"[dim bold red]LLM DEBUG: Request Messages (detail):[/dim bold red]")
                 messages_to_log = []
                 # Log system, a note about history, and last user message
                 if len(debug_params_log["messages"]) > 2: # system, user, potentially history
@@ -249,9 +249,9 @@ def stream_llm_response(
                 else: # Only system and user message
                     messages_to_log = debug_params_log["messages"]
                 for i, msg_item in enumerate(messages_to_log):
-                    console.print(f"[dim red]Message {i}: {json.dumps(msg_item, indent=2, default=str)}[/dim red]", stderr=True)
+                    Console(stderr=True).print(f"[dim red]Message {i}: {json.dumps(msg_item, indent=2, default=str)}[/dim red]")
                 del debug_params_log["messages"] # Avoid re-printing in main JSON
-            console.print(RichJSON(json.dumps(debug_params_log, indent=2, default=str)), stderr=True)
+            Console(stderr=True).print(RichJSON(json.dumps(debug_params_log, indent=2, default=str)))
 
         # Add dummy API key for LM Studio models.
         # api_base_url is the resolved API base (model-specific or global)
@@ -266,7 +266,7 @@ def stream_llm_response(
 
         for chunk in stream:
             if debug_llm_interactions_flag:
-                console.print(f"[dim bold red]LLM DEBUG: Raw Chunk ({model_name}):[/dim bold red]", stderr=True)
+                Console(stderr=True).print(f"[dim bold red]LLM DEBUG: Raw Chunk ({model_name}):[/dim bold red]")
                 try:
                     chunk_dict = chunk.dict() if hasattr(chunk, 'dict') else vars(chunk)
                     # Clean up common noisy fields for brevity in logs
@@ -274,10 +274,10 @@ def stream_llm_response(
                         del chunk_dict['id']
                     if 'system_fingerprint' in chunk_dict: # Often None or not useful for this log
                         del chunk_dict['system_fingerprint']
-                    console.print(RichJSON(json.dumps(chunk_dict, indent=2, default=str)), stderr=True)
+                    Console(stderr=True).print(RichJSON(json.dumps(chunk_dict, indent=2, default=str)))
                 except Exception as e_debug_chunk:
-                    console.print(f"[dim red]LLM DEBUG: Error serializing chunk for debug: {e_debug_chunk}[/dim red]", stderr=True)
-                    console.print(f"[dim red]Raw chunk object: {chunk}[/dim red]", stderr=True)
+                    Console(stderr=True).print(f"[dim red]LLM DEBUG: Error serializing chunk for debug: {e_debug_chunk}[/dim red]")
+                    Console(stderr=True).print(f"[dim red]Raw chunk object: {chunk}[/dim red]")
             delta = chunk.choices[0].delta
             if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
                 reasoning_chunk_content = delta.reasoning_content
@@ -461,6 +461,5 @@ def stream_llm_response(
         # Add error to history for context, but as a system message to avoid confusing the LLM
         conversation_history.append({"role": "system", "content": f"Error during LLM call: {error_msg}"})
         if debug_llm_interactions_flag:
-            console.print(f"[dim red]LLM DEBUG: Exception: {e}[/dim red]", stderr=True)
+            Console(stderr=True).print(f"[dim red]LLM DEBUG: Exception: {e}[/dim red]")
         return {"error": error_msg}
-
