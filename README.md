@@ -1,4 +1,4 @@
-# 🦾 Software Engineer AI Assistant
+# 🎯 Welcome to your Software Engineer AI Assistant
 
 ## Overview
 

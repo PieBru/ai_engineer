@@ -1334,25 +1334,26 @@ def main():
     if used_default_display:
         context_window_display_str += " (default)"
         
-    instructions = f"""📁 [bold bright_blue]Current Directory: [/bold bright_blue][bold green]{current_working_directory}[/bold green]
+    instructions = f"""  📁 [bold bright_blue]Current Directory: [/bold bright_blue][bold green]{current_working_directory}[/bold green]
 
-🧠 [bold bright_blue]Default Model: [/bold bright_blue][bold magenta]{current_model_name_for_display}[/bold magenta] ([dim]{context_window_display_str}[/dim])
-   Routing: [dim]{LITELLM_MODEL_ROUTING or 'Not Set'}[/dim] | Tools: [dim]{LITELLM_MODEL_TOOLS or 'Not Set'}[/dim]
-   Coding: [dim]{LITELLM_MODEL_CODING or 'Not Set'}[/dim] | Knowledge: [dim]{LITELLM_MODEL_KNOWLEDGE or 'Not Set'}[/dim]
-   Summarize: [dim]{LITELLM_MODEL_SUMMARIZE or 'Not Set'}[/dim] | Planner: [dim]{LITELLM_MODEL_PLANNER or 'Not Set'}[/dim]
-   Task Mgr: [dim]{LITELLM_MODEL_TASK_MANAGER or 'Not Set'}[/dim] | Rule Enh: [dim]{LITELLM_MODEL_RULE_ENHANCER or 'Not Set'}[/dim]
-   Prompt Enh: [dim]{LITELLM_MODEL_PROMPT_ENHANCER or 'Not Set'}[/dim] | Workflow Mgr: [dim]{LITELLM_MODEL_WORKFLOW_MANAGER or 'Not Set'}[/dim]
+  🧠 [bold bright_blue]Default Model: [/bold bright_blue][bold magenta]{current_model_name_for_display}[/bold magenta] ([dim]{context_window_display_str}[/dim])
+  Routing: [dim]{LITELLM_MODEL_ROUTING or 'Not Set'}[/dim] | Tools: [dim]{LITELLM_MODEL_TOOLS or 'Not Set'}[/dim]
+  Coding: [dim]{LITELLM_MODEL_CODING or 'Not Set'}[/dim] | Knowledge: [dim]{LITELLM_MODEL_KNOWLEDGE or 'Not Set'}[/dim]
+  Summarize: [dim]{LITELLM_MODEL_SUMMARIZE or 'Not Set'}[/dim] | Planner: [dim]{LITELLM_MODEL_PLANNER or 'Not Set'}[/dim]
+  Task Mgr: [dim]{LITELLM_MODEL_TASK_MANAGER or 'Not Set'}[/dim] | Rule Enh: [dim]{LITELLM_MODEL_RULE_ENHANCER or 'Not Set'}[/dim]
+  Prompt Enh: [dim]{LITELLM_MODEL_PROMPT_ENHANCER or 'Not Set'}[/dim] | Workflow Mgr: [dim]{LITELLM_MODEL_WORKFLOW_MANAGER or 'Not Set'}[/dim]
 
-📌 [bold bright_blue]Main Commands:[/bold bright_blue]
+  📌 [bold bright_blue]Main Commands:[/bold bright_blue]
   • [bright_cyan]/exit[/bright_cyan] or [bright_cyan]/quit[/bright_cyan] - End the session.
   • [bright_cyan]/help[/bright_cyan] - Display detailed help.
 
-👥 [bold white]Just ask naturally, like you are explaining to a colleague.[/bold white]"""
+  👥 [bold white]Just ask naturally, like you are explaining to a Software Engineer.[/bold white]"""
+
     console.print(Panel(
         instructions,
         border_style="blue",
         padding=(1, 2),
-        title="[bold blue]🎯 Software Engineer AI Assistant[/bold blue]",
+        title="[bold blue]🎯 Welcome to your Software Engineer AI Assistant[/bold blue]",
         title_align="left"
     ))
     console.print()
