@@ -1,4 +1,4 @@
-# /home/piero/Piero/AI/AI-Engineer/src/network_utils.py
+# src/network_utils.py
 import httpx
 
 def handle_local_mcp_stream(endpoint_url: str, timeout_seconds: int, max_data_chars: int) -> str:

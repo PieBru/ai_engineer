@@ -203,21 +203,16 @@ Configuration is primarily managed through environment variables. If an environm
 
 *   **`LITELLM_MODEL`**: Specifies the language model.
     *   Environment Variable: `LITELLM_MODEL`
-    *   Default: `"deepseek-reasoner"` (hardcoded in the application)
 *   **`LITELLM_API_BASE`**: Sets the API base URL for the model provider.
     *   Environment Variable: `LITELLM_API_BASE`
-    *   Default: `"https://api.deepseek.com/v1"` (hardcoded in the application)
 *   **`LITELLM_MAX_TOKENS`**: Sets the maximum tokens for the LLM response.
     *   Environment Variable: `LITELLM_MAX_TOKENS`
-    *   Default: `8192` (hardcoded in the application)
 *   **`REASONING_STYLE`**: Controls the verbosity of the AI's reasoning output.
     *   Environment Variable: `REASONING_STYLE`
     *   Possible values: `full`, `compact`, `silent`
-    *   Default: `"full"` (hardcoded in the application)
 *   **`REASONING_EFFORT`**: Controls the AI's reasoning depth by modifying the prompt.
     *   Environment Variable: `REASONING_EFFORT`
     *   Possible values: `low`, `medium`, `high`
-    *   Default: `"medium"` (hardcoded in the application)
 
 ### **High-Level Architecture**
 The following diagram illustrates the main components and their interactions within Software Engineer AI Assistant:

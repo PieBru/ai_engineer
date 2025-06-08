@@ -1,4 +1,4 @@
-# /home/piero/Piero/AI/AI-Engineer/src/llm_interaction.py
+# src/llm_interaction.py
 import copy
 import time
 import json

@@ -234,7 +234,7 @@ MODEL_CONFIGURATIONS: Dict[str, Dict[str, Any]] = {
 SUPPORTED_SET_PARAMS = {
     "model": {
         "env_var": "LITELLM_MODEL",
-        "description": "The default language model for general interaction (e.g., 'gpt-4o', 'deepseek-reasoner')."
+        "description": "The default language model for general interaction (e.g., 'ollama_chat/devstral', 'deepseek-reasoner')."
     },
     "model_routing": {
         "env_var": "LITELLM_MODEL_ROUTING",
@@ -250,7 +250,7 @@ SUPPORTED_SET_PARAMS = {
     },
     "model_knowledge": {
         "env_var": "LITELLM_MODEL_KNOWLEDGE",
-        "description": "The language model to use (e.g., 'gpt-4o', 'deepseek-reasoner')." # This description seems duplicated
+        "description": "The language model to use (e.g., 'ollama_chat/devstral', 'deepseek-reasoner')." # This description seems duplicated
     },
     "model_summarize": {
         "env_var": "LITELLM_MODEL_SUMMARIZE",
@@ -330,7 +330,7 @@ def get_model_test_expectations(model_name: str) -> Dict[str, Any]:
         config.update(MODEL_CONFIGURATIONS[model_name])
         return config
 
-    # Prefix match (e.g., "gpt-4o-mini" should match "gpt-4o")
+    # Prefix match (e.g., "ollama_chat/devstral-mini" should match "ollama_chat/devstral")
     # Sort keys by length descending to match more specific prefixes first
     sorted_model_keys = sorted(MODEL_CONFIGURATIONS.keys(), key=len, reverse=True)
     for prefix in sorted_model_keys:

@@ -163,7 +163,7 @@ def try_handle_set_command(user_input: str) -> bool:
         command_body = stripped_input[len(prefix_with_space):].strip()
         if command_body.lower() == "help":
             console.print("[yellow]Usage: /set <parameter> <value>[/yellow]")
-            console.print("[yellow]  Example: /set model gpt-4o[/yellow]")
+            console.print("[yellow]  Example: /set model ollama_chat/devstral[/yellow]")
             console.print("[yellow]Available parameters to set:[/yellow]")
             for p_name, p_config in SUPPORTED_SET_PARAMS.items():
                 console.print(f"  [bright_cyan]{p_name}[/bright_cyan]: {p_config['description']}")
@@ -176,7 +176,7 @@ def try_handle_set_command(user_input: str) -> bool:
         for p_name, p_config in SUPPORTED_SET_PARAMS.items():
             console.print(f"  [bright_cyan]{p_name}[/bright_cyan]: {p_config['description']}")
         console.print("\n[yellow]Usage: /set <parameter> <value>[/yellow]")
-        console.print("[yellow]  Example: /set model gpt-4o[/yellow]")
+        console.print("[yellow]  Example: /set model ollama_chat/devstral[/yellow]")
         return True
     command_parts = command_body.split(maxsplit=1)
     if len(command_parts) < 2:
@@ -612,7 +612,7 @@ def summarize_context():
     ]
     summary_messages.extend(conversation_history[1:])
     try:
-        model_name = get_config_value("model", "gpt-4o")
+        model_name = get_config_value("model", "ollama_chat/devstral")
         api_base_url = get_config_value("api_base", None)
         response = completion(
             model=model_name,
@@ -658,7 +658,7 @@ def _call_llm_for_prompt_generation(user_text: str, mode: str) -> str:
         {"role": "user", "content": user_query}
     ]
     try:
-        model_name = get_config_value("model", "gpt-4o")
+        model_name = get_config_value("model", "ollama_chat/devstral")
         api_base_url = get_config_value("api_base", None)
         max_tokens_val = get_config_value("max_tokens", 2048)
         response = completion(

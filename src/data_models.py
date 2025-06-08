@@ -1,4 +1,4 @@
-# /home/piero/Piero/AI/AI-Engineer/src/data_models.py
+# src/data_models.py
 from pydantic import BaseModel, ConfigDict
 
 class FileToCreate(BaseModel):

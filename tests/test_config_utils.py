@@ -256,7 +256,7 @@ class TestGetModelContextWindow:
 
     def test_get_model_context_window_exact_match(self):
         # Test exact match
-        model_name = "gpt-4o"
+        model_name = "ollama_chat/devstral"
         expected_window = config_utils.MODEL_CONTEXT_WINDOWS[model_name]
         assert config_utils.get_model_context_window(model_name) == expected_window
         

@@ -1,4 +1,4 @@
-# /home/piero/Piero/AI/AI-Engineer/src/file_context_utils.py
+# src/file_context_utils.py
 import os
 from pathlib import Path
 from rich.console import Console
