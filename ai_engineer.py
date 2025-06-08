@@ -17,6 +17,11 @@ from src.config_utils import (
     DEFAULT_LITELLM_MODEL_CODING,
     DEFAULT_LM_STUDIO_API_BASE, # Import for checking
     DEFAULT_LITELLM_MODEL_KNOWLEDGE,
+    DEFAULT_LITELLM_MODEL_PLANNER,
+    DEFAULT_LITELLM_MODEL_TASK_MANAGER,
+    DEFAULT_LITELLM_MODEL_RULE_ENHANCER,
+    DEFAULT_LITELLM_MODEL_PROMPT_ENHANCER,
+    DEFAULT_LITELLM_MODEL_WORKFLOW_MANAGER,
     DEFAULT_REASONING_EFFORT,
     DEFAULT_REASONING_STYLE
 )
@@ -29,6 +34,11 @@ LITELLM_MODEL_ROUTING = os.getenv("LITELLM_MODEL_ROUTING", DEFAULT_LITELLM_MODEL
 LITELLM_MODEL_TOOLS = os.getenv("LITELLM_MODEL_TOOLS", DEFAULT_LITELLM_MODEL_TOOLS)
 LITELLM_MODEL_CODING = os.getenv("LITELLM_MODEL_CODING", DEFAULT_LITELLM_MODEL_CODING)
 LITELLM_MODEL_KNOWLEDGE = os.getenv("LITELLM_MODEL_KNOWLEDGE", DEFAULT_LITELLM_MODEL_KNOWLEDGE)
+LITELLM_MODEL_PLANNER = os.getenv("LITELLM_MODEL_PLANNER", DEFAULT_LITELLM_MODEL_PLANNER)
+LITELLM_MODEL_TASK_MANAGER = os.getenv("LITELLM_MODEL_TASK_MANAGER", DEFAULT_LITELLM_MODEL_TASK_MANAGER)
+LITELLM_MODEL_RULE_ENHANCER = os.getenv("LITELLM_MODEL_RULE_ENHANCER", DEFAULT_LITELLM_MODEL_RULE_ENHANCER)
+LITELLM_MODEL_PROMPT_ENHANCER = os.getenv("LITELLM_MODEL_PROMPT_ENHANCER", DEFAULT_LITELLM_MODEL_PROMPT_ENHANCER)
+LITELLM_MODEL_WORKFLOW_MANAGER = os.getenv("LITELLM_MODEL_WORKFLOW_MANAGER", DEFAULT_LITELLM_MODEL_WORKFLOW_MANAGER)
 
 LITELLM_API_BASE = os.getenv("LITELLM_API_BASE", DEFAULT_LITELLM_API_BASE)
 LITELLM_MAX_TOKENS = int(os.getenv("LITELLM_MAX_TOKENS", DEFAULT_LITELLM_MAX_TOKENS))
@@ -56,6 +66,7 @@ from src.config_utils import (
     SUPPORTED_SET_PARAMS, MAX_FILES_TO_PROCESS_IN_DIR, MAX_FILE_SIZE_BYTES, 
     MODEL_CONFIGURATIONS, SHOW_TEST_INFERENCE_NOTES_ERRORS_COLUMN, # Use MODEL_CONFIGURATIONS
     RUNTIME_OVERRIDES,
+    get_model_test_expectations as get_full_model_expectations, # Renamed for clarity
     get_model_test_expectations, # Use new helper
     get_model_context_window # Keep for general use, test uses expectations
 )
@@ -707,8 +718,11 @@ def _perform_api_call_for_test(model_name_to_test: str, messages: list, api_base
         "timeout": timeout_val,
         **completion_kwargs
     }
-    # If the target API base is LM Studio, add a dummy API key
-    if api_base_for_call == DEFAULT_LM_STUDIO_API_BASE:
+
+    # Add dummy API key for LM Studio models.
+    # api_base_for_call is the resolved API base (model-specific or global)
+    # model_name_to_test is the name of the model being called.
+    if model_name_to_test.startswith("lm_studio/"):
         call_args["api_key"] = "dummy"
 
     if tools_list:
@@ -719,7 +733,7 @@ def _perform_api_call_for_test(model_name_to_test: str, messages: list, api_base
 def _test_single_model_capabilities(model_label: str, model_name_to_test: str, api_base_to_test: str, role_expect_tools: bool) -> Dict[str, Any]:
     """Helper function to test capabilities of a single model."""
     
-    model_expectations = get_model_test_expectations(model_name_to_test)
+    model_expectations = get_full_model_expectations(model_name_to_test) # Use renamed import
     expected_tool_support = model_expectations.get("supports_tools", role_expect_tools) # Prioritize model-specific, fallback to role
     expected_thinking_model = model_expectations.get("is_thinking_model", False)
     # thinking_type = model_expectations.get("thinking_type") # For future use # Corrected divisor for KB
@@ -753,8 +767,12 @@ def _test_single_model_capabilities(model_label: str, model_name_to_test: str, a
         elif "deepseek" in api_base_to_test.lower() or "deepseek" in model_name_to_test.lower(): api_key_name_hint = "DEEPSEEK_API_KEY"
         elif "anthropic" in api_base_to_test.lower() or "claude" in model_name_to_test.lower(): api_key_name_hint = "ANTHROPIC_API_KEY"
         elif "openrouter" in api_base_to_test.lower(): api_key_name_hint = "OPENROUTER_API_KEY"
+    
+    # Determine the final API base for this specific model test
+    api_base_for_call = model_expectations.get("api_base") 
+    if api_base_for_call is None: # If model config didn't specify one (or it was explicitly None)
+        api_base_for_call = api_base_to_test # Fallback to the global/passed-in API base
 
-    api_base_for_call = api_base_to_test
     pre_call_notes = []
     completion_kwargs: Dict[str, Any] = {} # For proxies, etc.
 
@@ -767,19 +785,37 @@ def _test_single_model_capabilities(model_label: str, model_name_to_test: str, a
             "cohere": "api.cohere.ai", "cerebras": "api.cerebras.com"
         }
 
-        if is_ollama_model:
-            if not api_base_for_call.lower().startswith("http://") or \
-               not ("localhost" in api_base_for_call.lower() or "127.0.0.1" in api_base_for_call.lower()):
-                api_base_for_call = None
-        elif provider_from_model_name in known_direct_providers_domains and \
-             known_direct_providers_domains[provider_from_model_name] not in api_base_for_call.lower():
-            if provider_from_model_name == "google":
-                api_base_for_call = "https://generativelanguage.googleapis.com"
-                pre_call_notes.append(f"[dim]  (Note: Testing '{model_name_to_test}' with explicit Google API base: '{api_base_for_call}')[/dim]")
-                completion_kwargs["proxies"] = None
-                pre_call_notes.append(f"[dim]  (Note: Explicitly disabling proxies for direct Google API call to '{model_name_to_test}')[/dim]")
-            else:
-                api_base_for_call = None
+        # This logic might override a specifically configured api_base from MODEL_CONFIGURATIONS
+        # if it doesn't match the expected domain for a known provider.
+        # This could be problematic if a user is proxying a known provider through a custom domain.
+        # For now, we'll keep it, but it's a point of attention.
+        # If api_base_for_call was already set (e.g. from MODEL_CONFIGURATIONS), we should be careful.
+        # The current `api_base_for_call` is already resolved. This block might re-resolve it.
+        # Let's assume `api_base_for_call` is the one to use, and this block is for providers
+        # that LiteLLM handles internally without an explicit api_base.
+        if api_base_for_call: # Only apply this logic if we have an api_base to check
+            if is_ollama_model:
+                if not api_base_for_call.lower().startswith("http://") or \
+                   not ("localhost" in api_base_for_call.lower() or "127.0.0.1" in api_base_for_call.lower()):
+                    # This case implies a misconfiguration if an ollama model is not pointed to a local http endpoint.
+                    # Or, it's a remote Ollama, which is fine. Let's not nullify api_base_for_call here.
+                    pass # pre_call_notes.append(f"[yellow]Warning: Ollama model '{model_name_to_test}' with non-standard base '{api_base_for_call}'[/yellow]")
+            elif provider_from_model_name in known_direct_providers_domains and \
+                 known_direct_providers_domains[provider_from_model_name] not in api_base_for_call.lower():
+                # If the model is from a known cloud provider, but the api_base_for_call
+                # (which could be from MODEL_CONFIGURATIONS or global default) doesn't match the provider's domain,
+                # it might be a proxy. LiteLLM usually handles direct cloud providers without an api_base.
+                # Setting api_base_for_call to None here lets LiteLLM use its internal defaults for these providers.
+                # This is only done if api_base_for_call was NOT specifically set for this model in MODEL_CONFIGURATIONS.
+                if model_expectations.get("api_base") is None: # Only override if not model-specific
+                    if provider_from_model_name == "google": # Special handling for Google
+                        api_base_for_call = "https://generativelanguage.googleapis.com" # Force direct
+                        pre_call_notes.append(f"[dim]  (Note: Forcing direct Google API base for '{model_name_to_test}')[/dim]")
+                        completion_kwargs["proxies"] = None # Disable proxies for direct Google
+                        pre_call_notes.append(f"[dim]  (Note: Disabling proxies for direct Google API call)[/dim]")
+                    else:
+                         api_base_for_call = None # Let LiteLLM handle (e.g. OpenAI, Anthropic)
+                         pre_call_notes.append(f"[dim]  (Note: Letting LiteLLM manage API base for '{model_name_to_test}' with provider '{provider_from_model_name}')[/dim]")
     
     if "gemini" in model_name_to_test.lower() or "google" in model_name_to_test.lower():
          pre_call_notes.append(f"[bold yellow blink]DEBUG Gemini Test Params:[/bold yellow blink] model='{model_name_to_test}', api_base_for_call='{api_base_for_call}'")
@@ -902,7 +938,7 @@ def _test_single_model_capabilities(model_label: str, model_name_to_test: str, a
             console.print(f"[dim]  {mismatch_note}[/dim]")
             
     else: # Not expected to support tools
-        console.print(" [dim]No (As Expected)[/dim]") # Indicate 'No' tool support, as expected
+        console.print(" [dim]No (Test Disabled in `config_utils.py`)[/dim]") # Indicate 'No' tool support, as expected
         results["tool_support"] = "N" # Set to 'N' for consistency in table (will show as red 'N')
 
     if results["available"] == "N" and results["inference_time_s"] == "N/A": # Ensure time is recorded if initial call failed
@@ -925,6 +961,11 @@ def test_inference_endpoint(specific_model_name: str = None):
         {"label": "TOOLS",     "name_var": LITELLM_MODEL_TOOLS,     "expect_tools": True},
         {"label": "CODING",    "name_var": LITELLM_MODEL_CODING,    "expect_tools": False},
         {"label": "KNOWLEDGE", "name_var": LITELLM_MODEL_KNOWLEDGE, "expect_tools": False},
+        {"label": "PLANNER",   "name_var": LITELLM_MODEL_PLANNER,   "expect_tools": False},
+        {"label": "TASK_MGR",  "name_var": LITELLM_MODEL_TASK_MANAGER, "expect_tools": False},
+        {"label": "RULE_ENH",  "name_var": LITELLM_MODEL_RULE_ENHANCER, "expect_tools": False},
+        {"label": "PROMPT_ENH","name_var": LITELLM_MODEL_PROMPT_ENHANCER, "expect_tools": False},
+        {"label": "WORKFLOW_MGR","name_var": LITELLM_MODEL_WORKFLOW_MANAGER, "expect_tools": True}, # Workflow manager might need tools
     ]
     
     default_model_available = False
@@ -1158,6 +1199,11 @@ def main():
    Routing: [dim]{LITELLM_MODEL_ROUTING or 'Not Set'}[/dim] | Tools: [dim]{LITELLM_MODEL_TOOLS or 'Not Set'}[/dim]
    Coding: [dim]{LITELLM_MODEL_CODING or 'Not Set'}[/dim] | Knowledge: [dim]{LITELLM_MODEL_KNOWLEDGE or 'Not Set'}[/dim]
    📁 Current Directory: [bold green]{current_working_directory}[/bold green]
+   Planner: [dim]{LITELLM_MODEL_PLANNER or 'Not Set'}[/dim] | Task Mgr: [dim]{LITELLM_MODEL_TASK_MANAGER or 'Not Set'}[/dim]
+   Rule Enh: [dim]{LITELLM_MODEL_RULE_ENHANCER or 'Not Set'}[/dim]
+   Prompt Enh: [dim]{LITELLM_MODEL_PROMPT_ENHANCER or 'Not Set'}[/dim]
+   Workflow Mgr: [dim]{LITELLM_MODEL_WORKFLOW_MANAGER or 'Not Set'}[/dim]
+
 
 [bold bright_blue]▶️ Commands:[/bold bright_blue]
   • [bright_cyan]/exit[/bright_cyan] or [bright_cyan]/quit[/bright_cyan] - End the session.

@@ -17,6 +17,11 @@ DEFAULT_LITELLM_MODEL_ROUTING = "ollama_chat/gemma3:4b-it-qat" # Often a smaller
 DEFAULT_LITELLM_MODEL_TOOLS = "ollama_chat/deepcoder:14b-preview-q8_0" # By default, tools model is same as default
 DEFAULT_LITELLM_MODEL_CODING = "ollama_chat/deepcoder:14b-preview-q8_0" # Specialized coding model, also "deepseek/deepseek-reasoner" (SOTA 2025, slower, more expensive)
 DEFAULT_LITELLM_MODEL_KNOWLEDGE = "ollama_chat/gemma3:27b-it-qat" # For general knowledge, summarization
+DEFAULT_LITELLM_MODEL_PLANNER = "ollama_chat/gemma3:4b-it-qat" # For planning complex tasks
+DEFAULT_LITELLM_MODEL_TASK_MANAGER = "ollama_chat/gemma3:12b-it-qat" # For breaking down tasks
+DEFAULT_LITELLM_MODEL_RULE_ENHANCER = "ollama_chat/gemma3:12b-it-qat" # For refining rules/prompts
+DEFAULT_LITELLM_MODEL_PROMPT_ENHANCER = "ollama_chat/gemma3:12b-it-qat" # For enhancing user prompts
+DEFAULT_LITELLM_MODEL_WORKFLOW_MANAGER = "ollama_chat/gemma3:4b-it-qat" # For managing multi-step workflows
 
 # Default UI and Reasoning configuration values
 DEFAULT_REASONING_EFFORT = "medium"  # Possible values: "low", "medium", "high"
@@ -36,7 +41,8 @@ DEFAULT_MODEL_TEST_EXPECTATIONS: Dict[str, Any] = {
     "context_window": 16384,  # Fallback if a model is not in the map
     "supports_tools": False,  # Default expectation for tool support
     "is_thinking_model": False, # Default expectation for <think> prefix
-    "thinking_type": None     # E.g., "qwen3", "deepseek", "mistral"
+    "thinking_type": None,    # E.g., "qwen3", "deepseek", "mistral"
+    "api_base": None          # Default API base for a model, None means use global or provider default
 }
 
 # Model-specific configurations including context window and test expectations
@@ -47,7 +53,8 @@ MODEL_CONFIGURATIONS: Dict[str, Dict[str, Any]] = {
     #     "context_window": 128000,
     #     "supports_tools": True,
     #     "is_thinking_model": True,
-    #     "thinking_type": "qwen"
+    #     "thinking_type": "qwen",
+    #     "api_base": None # Example: "http://my-specific-ollama:11434" or None to use default
     # },
 
     # To do
@@ -68,108 +75,127 @@ MODEL_CONFIGURATIONS: Dict[str, Dict[str, Any]] = {
     "ollama_chat/devstral": {  # https://mistral.ai/news/devstral
         "context_window": 131072,
         "supports_tools": False,
-        "is_thinking_model": False
+        "is_thinking_model": False,
+        "api_base": DEFAULT_OLLAMA_API_BASE
     },
     "ollama_chat/deepcoder:14b-preview-q8_0": {  # https://www.together.ai/blog/deepcoder
         "context_window": 65536,
         "supports_tools": True,
         "is_thinking_model": True,
-        "thinking_type": "qwen"
+        "thinking_type": "qwen",
+        "api_base": DEFAULT_OLLAMA_API_BASE
     },
    "ollama_chat/qwen2.5-coder:3b": {
         "context_window": 32768,
         "supports_tools": False,
-        "is_thinking_model": False
+        "is_thinking_model": False,
+        "api_base": DEFAULT_OLLAMA_API_BASE
     },
    "ollama_chat/qwen2.5-coder:7b": {
         "context_window": 131072,
         "supports_tools": False,
-        "is_thinking_model": False
+        "is_thinking_model": False,
+        "api_base": DEFAULT_OLLAMA_API_BASE
     },
    "ollama_chat/qwen2.5-coder:14b": {
         "context_window": 131072,
         "supports_tools": False,
-        "is_thinking_model": False
+        "is_thinking_model": False,
+        "api_base": DEFAULT_OLLAMA_API_BASE
     },
    "ollama_chat/qwen2.5-coder:32b": {  # https://qwenlm.github.io/blog/qwen2.5-coder-family/
         "context_window": 131072,
         "supports_tools": False,
-        "is_thinking_model": False
+        "is_thinking_model": False,
+        "api_base": DEFAULT_OLLAMA_API_BASE
     },
     "ollama_chat/qwen3:0.6b": {
         "context_window": 40000,
         "supports_tools": False,
         "is_thinking_model": True,
-        "thinking_type": "qwen"  # Use <think> ... </think>
+        "thinking_type": "qwen",  # Use <think> ... </think>
+        "api_base": DEFAULT_OLLAMA_API_BASE
     },
     "ollama_chat/qwen3:1.7b": {
         "context_window": 40000,
         "supports_tools": True,
         "is_thinking_model": True,
-        "thinking_type": "qwen"  # Use <think> ... </think>
+        "thinking_type": "qwen",  # Use <think> ... </think>
+        "api_base": DEFAULT_OLLAMA_API_BASE
     },
     "ollama_chat/qwen3:4b": {
         "context_window": 40000,
         "supports_tools": True,
         "is_thinking_model": True,
-        "thinking_type": "qwen"  # Use <think> ... </think>
+        "thinking_type": "qwen",  # Use <think> ... </think>
+        "api_base": DEFAULT_OLLAMA_API_BASE
     },
     "ollama_chat/qwen3:8b": {
         "context_window": 40000,
         "supports_tools": True,
         "is_thinking_model": True,
-        "thinking_type": "qwen"  # Use <think> ... </think>
+        "thinking_type": "qwen",  # Use <think> ... </think>
+        "api_base": DEFAULT_OLLAMA_API_BASE
     },
     "ollama_chat/qwen3:14b": {
         "context_window": 40000,
         "supports_tools": True,
         "is_thinking_model": True,
-        "thinking_type": "qwen"  # Use <think> ... </think>
+        "thinking_type": "qwen",  # Use <think> ... </think>
+        "api_base": DEFAULT_OLLAMA_API_BASE
     },
     "ollama_chat/qwen3:30b": {
         "context_window": 40000,
         "supports_tools": False,
         "is_thinking_model": True,
-        "thinking_type": "qwen"  # Use <think> ... </think>
+        "thinking_type": "qwen",  # Use <think> ... </think>
+        "api_base": DEFAULT_OLLAMA_API_BASE
     },
     "ollama_chat/qwen3:32b": {
         "context_window": 40000,
-        "supports_tools": True,
+        "supports_tools": False,  # Should be True, but ollama 0.9.0 has memory allocation problems with this test enabled.
         "is_thinking_model": True,
-        "thinking_type": "qwen"  # Use <think> ... </think>
+        "thinking_type": "qwen",  # Use <think> ... </think>
+        "api_base": DEFAULT_OLLAMA_API_BASE
     },
     "ollama_chat/gemma3:1b-it-qat": {
         "context_window": 128000,
         "supports_tools": False,
-        "is_thinking_model": False
+        "is_thinking_model": False,
+        "api_base": DEFAULT_OLLAMA_API_BASE
     },
     "ollama_chat/gemma3:4b-it-qat": {
         "context_window": 128000,
         "supports_tools": False,
-        "is_thinking_model": False
+        "is_thinking_model": False,
+        "api_base": DEFAULT_OLLAMA_API_BASE
     },
     "ollama_chat/gemma3:12b-it-qat": {
         "context_window": 128000,
         "supports_tools": False,
-        "is_thinking_model": False
+        "is_thinking_model": False,
+        "api_base": DEFAULT_OLLAMA_API_BASE
     },
     "ollama_chat/gemma3:27b-it-qat": {
         "context_window": 128000,
         "supports_tools": False,
-        "is_thinking_model": False
+        "is_thinking_model": False,
+        "api_base": DEFAULT_OLLAMA_API_BASE
     },
     "ollama_chat/qwq": {
         "context_window": 131072,
-        "supports_tools": True,
+        "supports_tools": False,  # Should be True, but ollama 0.9.0 has memory allocation problems with this test enabled.
         "is_thinking_model": True,
-        "thinking_type": "qwen"
+        "thinking_type": "qwen",
+        "api_base": DEFAULT_OLLAMA_API_BASE # Or "http://specific-ollama-server:11434"
     },
 
     "lm_studio/deepseek-r1-0528-qwen3-8b@q8_0": {
         "context_window": 131072,
         "supports_tools": False,
         "is_thinking_model": True,
-        "thinking_type": "qwen"
+        "thinking_type": "qwen",
+        "api_base": DEFAULT_LM_STUDIO_API_BASE
     },
 
     #"deepseek/deepseek-chat": {
@@ -186,19 +212,23 @@ MODEL_CONFIGURATIONS: Dict[str, Dict[str, Any]] = {
     #    "context_window": 128000,
     #    "supports_tools": True,
     #    "is_thinking_model": False,
+    #    "api_base": None # Uses LiteLLM's default for deepseek
     #},
 
     # Add other models here with their specific configurations
     # OpenRouter Examples (FIXME: Update with actuals and expectations)
     # "openrouter/deepseek/deepseek-coder": {"context_window": 128000, "supports_tools": True, "is_thinking_model": True, "thinking_type": "deepseek"},
     # "openrouter/meta-llama/llama-3-8b-instruct": {"context_window": 8192, "supports_tools": True},
+    # For OpenRouter, api_base is typically None as LiteLLM handles it.
 
     # Cerebras Examples (FIXME: Update with actuals and expectations)
     # "cerebras/llama-3.3-70b": {"context_window": 32768, "supports_tools": True},
     # "cerebras/llama-4-scout-17b-16e-instruct": {"context_window": 32768, "supports_tools": True},
+    # For Cerebras, api_base is typically None.
 
     # Gemini Examples (FIXME: Update with actuals and expectations)
     # "gemini/gemini-1.5-pro-latest": {"context_window": 1048576, "supports_tools": True},
+    # For Gemini, api_base is typically None.
 }
 
 SUPPORTED_SET_PARAMS = {
@@ -221,6 +251,26 @@ SUPPORTED_SET_PARAMS = {
     "model_knowledge": {
         "env_var": "LITELLM_MODEL_KNOWLEDGE",
         "description": "The language model to use (e.g., 'gpt-4o', 'deepseek-reasoner')." # This description seems duplicated
+    },
+    "model_planner": {
+        "env_var": "LITELLM_MODEL_PLANNER",
+        "description": "The model used for planning complex tasks and outlining steps."
+    },
+    "model_task_manager": {
+        "env_var": "LITELLM_MODEL_TASK_MANAGER",
+        "description": "The model used for breaking down planned tasks into smaller, manageable sub-tasks."
+    },
+    "model_rule_enhancer": {
+        "env_var": "LITELLM_MODEL_RULE_ENHANCER",
+        "description": "The model used for analyzing and enhancing system rules or existing prompts."
+    },
+    "model_prompt_enhancer": {
+        "env_var": "LITELLM_MODEL_PROMPT_ENHANCER",
+        "description": "The model used for refining and detailing user-provided prompts for better AI interaction."
+    },
+    "model_workflow_manager": {
+        "env_var": "LITELLM_MODEL_WORKFLOW_MANAGER",
+        "description": "The model used for managing and orchestrating multi-step workflows or agentic sequences."
     },
     "api_base": {
         "env_var": "LITELLM_API_BASE",
@@ -283,11 +333,20 @@ def get_model_test_expectations(model_name: str) -> Dict[str, Any]:
         if model_name.startswith(prefix):
             config = DEFAULT_MODEL_TEST_EXPECTATIONS.copy()
             config.update(MODEL_CONFIGURATIONS[prefix])
-            # If the original model name had a more specific context window in the old map,
-            # we might want to preserve that. For now, prefix match takes all from matched entry.
+            # Ensure api_base from the specific prefix match is preserved if it was set
+            if MODEL_CONFIGURATIONS[prefix].get("api_base") is not None:
+                config["api_base"] = MODEL_CONFIGURATIONS[prefix]["api_base"]
             return config
             
-    return DEFAULT_MODEL_TEST_EXPECTATIONS.copy()
+    # If no match, return a copy of defaults
+    config = DEFAULT_MODEL_TEST_EXPECTATIONS.copy()
+    # Apply provider-default API base if model_name gives a hint and api_base is still None
+    if config.get("api_base") is None:
+        if model_name.startswith("ollama_chat/"):
+            config["api_base"] = DEFAULT_OLLAMA_API_BASE
+        elif model_name.startswith("lm_studio/"):
+            config["api_base"] = DEFAULT_LM_STUDIO_API_BASE
+    return config
 
 
 def get_model_context_window(model_name: str, return_match_status: bool = False) -> Union[int, Tuple[int, bool]]:
@@ -364,4 +423,9 @@ MODEL_CONTEXT_WINDOWS.update({ # Add defaults for role-based models if not expli
     DEFAULT_LITELLM_MODEL_TOOLS: get_model_test_expectations(DEFAULT_LITELLM_MODEL_TOOLS)["context_window"],
     DEFAULT_LITELLM_MODEL_CODING: get_model_test_expectations(DEFAULT_LITELLM_MODEL_CODING)["context_window"],
     DEFAULT_LITELLM_MODEL_KNOWLEDGE: get_model_test_expectations(DEFAULT_LITELLM_MODEL_KNOWLEDGE)["context_window"],
+    DEFAULT_LITELLM_MODEL_PLANNER: get_model_test_expectations(DEFAULT_LITELLM_MODEL_PLANNER)["context_window"],
+    DEFAULT_LITELLM_MODEL_TASK_MANAGER: get_model_test_expectations(DEFAULT_LITELLM_MODEL_TASK_MANAGER)["context_window"],
+    DEFAULT_LITELLM_MODEL_RULE_ENHANCER: get_model_test_expectations(DEFAULT_LITELLM_MODEL_RULE_ENHANCER)["context_window"],
+    DEFAULT_LITELLM_MODEL_PROMPT_ENHANCER: get_model_test_expectations(DEFAULT_LITELLM_MODEL_PROMPT_ENHANCER)["context_window"],
+    DEFAULT_LITELLM_MODEL_WORKFLOW_MANAGER: get_model_test_expectations(DEFAULT_LITELLM_MODEL_WORKFLOW_MANAGER)["context_window"],
 })

@@ -14,7 +14,8 @@ from litellm import completion
 from src.tool_defs import tools, RISKY_TOOLS
 from src.config_utils import (
     get_config_value, DEFAULT_LITELLM_MODEL,
-    DEFAULT_LITELLM_API_BASE, DEFAULT_LM_STUDIO_API_BASE, # Import for checking
+    DEFAULT_LITELLM_API_BASE, DEFAULT_LM_STUDIO_API_BASE,
+    get_model_test_expectations, # Import for getting model-specific API base
     DEFAULT_REASONING_STYLE, DEFAULT_LITELLM_MAX_TOKENS, DEFAULT_REASONING_EFFORT,
     MAX_FILE_SIZE_BYTES
 )
@@ -156,7 +157,13 @@ def stream_llm_response(
         default_temperature_val = 0.7
 
         model_name = get_config_value("model", DEFAULT_LITELLM_MODEL)
-        api_base_url = get_config_value("api_base", DEFAULT_LITELLM_API_BASE)
+        
+        # Determine API base for this specific model_name
+        model_expectations = get_model_test_expectations(model_name)
+        api_base_url = model_expectations.get("api_base")
+        if api_base_url is None: # Fallback to global LITELLM_API_BASE if model-specific one is not set
+            api_base_url = get_config_value("api_base", DEFAULT_LITELLM_API_BASE)
+
         reasoning_style = str(get_config_value("reasoning_style", DEFAULT_REASONING_STYLE)).lower()
         max_tokens_raw = get_config_value("max_tokens", DEFAULT_LITELLM_MAX_TOKENS)
         try:
@@ -200,8 +207,9 @@ def stream_llm_response(
             "stream": True
         }
 
-        # If the target API base is LM Studio, add a dummy API key
-        if api_base_url == DEFAULT_LM_STUDIO_API_BASE:
+        # Add dummy API key for LM Studio models.
+        # api_base_url is the resolved API base (model-specific or global)
+        if model_name.startswith("lm_studio/"):
             completion_params["api_key"] = "dummy"
 
         reasoning_content_accumulated = ""
