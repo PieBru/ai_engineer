@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 # Default LiteLLM configuration values - LITELLM_MODEL serves as LITELLM_MODEL_DEFAULT
 DEFAULT_OLLAMA_API_BASE = "http://localhost:11434"
 DEFAULT_LM_STUDIO_API_BASE = "http://localhost:1234/v1"
-DEFAULT_LITELLM_API_BASE = DEFAULT_LM_STUDIO_API_BASE
 DEFAULT_LITELLM_MODEL = "ollama_chat/deepcoder:14b-preview-q8_0" # Example, adjust as needed
 DEFAULT_LITELLM_MAX_TOKENS = 32768  # For models which context window size is unknown
 
@@ -16,12 +15,12 @@ DEFAULT_LITELLM_MODEL_ROUTING =          "ollama_chat/gemma3:4b-it-qat" # Often 
 DEFAULT_LITELLM_MODEL_TOOLS =            DEFAULT_LITELLM_MODEL # A good tool calls handler
 DEFAULT_LITELLM_MODEL_CODING =           DEFAULT_LITELLM_MODEL # Specialized coding model, also "deepseek/deepseek-reasoner" (SOTA 2025, slower, more expensive)
 DEFAULT_LITELLM_MODEL_KNOWLEDGE =        "ollama_chat/gemma3:27b-it-qat" # For general knowledge
-DEFAULT_LITELLM_MODEL_SUMMARIZE =        "ollama_chat/gemma3:4b-it-qat" # For text summarization
-DEFAULT_LITELLM_MODEL_PLANNER =          "ollama_chat/gemma3:4b-it-qat" # For planning complex tasks
-DEFAULT_LITELLM_MODEL_TASK_MANAGER =     "ollama_chat/gemma3:4b-it-qat" # For breaking down tasks
+DEFAULT_LITELLM_MODEL_SUMMARIZE =        DEFAULT_LITELLM_MODEL_KNOWLEDGE # For text summarization
+DEFAULT_LITELLM_MODEL_PLANNER =          DEFAULT_LITELLM_MODEL_KNOWLEDGE # For planning complex tasks
+DEFAULT_LITELLM_MODEL_TASK_MANAGER =     DEFAULT_LITELLM_MODEL_KNOWLEDGE # For breaking down tasks
 DEFAULT_LITELLM_MODEL_RULE_ENHANCER =    DEFAULT_LITELLM_MODEL_KNOWLEDGE # For refining rules/prompts
-DEFAULT_LITELLM_MODEL_PROMPT_ENHANCER =  "ollama_chat/gemma3:4b-it-qat" # For enhancing user prompts
-DEFAULT_LITELLM_MODEL_WORKFLOW_MANAGER = "ollama_chat/gemma3:4b-it-qat" # For managing multi-step workflows
+DEFAULT_LITELLM_MODEL_PROMPT_ENHANCER =  DEFAULT_LITELLM_MODEL_KNOWLEDGE # For enhancing user prompts
+DEFAULT_LITELLM_MODEL_WORKFLOW_MANAGER = DEFAULT_LITELLM_MODEL_KNOWLEDGE # For managing multi-step workflows
 
 # Default UI and Reasoning configuration values
 DEFAULT_REASONING_EFFORT = "medium"  # Possible values: "low", "medium", "high"

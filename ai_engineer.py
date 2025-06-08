@@ -85,7 +85,6 @@ if os.getenv("VIRTUAL_ENV") is None: # Check if VIRTUAL_ENV is not set
 # Import default constants from config_utils first
 from src.config_utils import (
     DEFAULT_LITELLM_MODEL,
-    DEFAULT_LITELLM_API_BASE,
     DEFAULT_LITELLM_MAX_TOKENS,
     DEFAULT_LITELLM_MODEL_ROUTING,
     DEFAULT_LITELLM_MODEL_TOOLS,
@@ -116,7 +115,6 @@ LITELLM_MODEL_RULE_ENHANCER = os.getenv("LITELLM_MODEL_RULE_ENHANCER", DEFAULT_L
 LITELLM_MODEL_PROMPT_ENHANCER = os.getenv("LITELLM_MODEL_PROMPT_ENHANCER", DEFAULT_LITELLM_MODEL_PROMPT_ENHANCER)
 LITELLM_MODEL_WORKFLOW_MANAGER = os.getenv("LITELLM_MODEL_WORKFLOW_MANAGER", DEFAULT_LITELLM_MODEL_WORKFLOW_MANAGER)
 
-LITELLM_API_BASE = os.getenv("LITELLM_API_BASE", DEFAULT_LITELLM_API_BASE)
 LITELLM_MAX_TOKENS = int(os.getenv("LITELLM_MAX_TOKENS", DEFAULT_LITELLM_MAX_TOKENS))
 REASONING_EFFORT = os.getenv("REASONING_EFFORT", DEFAULT_REASONING_EFFORT)
 REASONING_STYLE = os.getenv("REASONING_STYLE", DEFAULT_REASONING_STYLE)
@@ -1070,7 +1068,7 @@ def test_inference_endpoint(specific_model_name: str = None):
         console.print("[bold blue]🧪 Testing All Configured Inference Endpoints & Capabilities...[/bold blue]")
         console.print("[dim]Note: This test covers models from MODEL_CONFIGURATIONS and explicitly configured role-based models.[/dim]")
     
-    api_base_url = get_config_value("api_base", DEFAULT_LITELLM_API_BASE)
+    api_base_url = get_config_value("api_base", None)
     role_based_models_config = [
         {"label": "DEFAULT",   "name_var": LITELLM_MODEL_DEFAULT,   "expect_tools": True},
         {"label": "ROUTING",   "name_var": LITELLM_MODEL_ROUTING,   "expect_tools": False},

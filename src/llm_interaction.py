@@ -13,8 +13,7 @@ from litellm import completion
 
 from src.tool_defs import tools, RISKY_TOOLS
 from src.config_utils import (
-    get_config_value, DEFAULT_LITELLM_MODEL,
-    DEFAULT_LITELLM_API_BASE, DEFAULT_LM_STUDIO_API_BASE,
+    get_config_value, DEFAULT_LITELLM_MODEL, DEFAULT_LM_STUDIO_API_BASE,
     get_model_test_expectations, # Import for getting model-specific API base
     DEFAULT_REASONING_STYLE, DEFAULT_LITELLM_MAX_TOKENS, DEFAULT_REASONING_EFFORT,
     MAX_FILE_SIZE_BYTES
@@ -158,11 +157,29 @@ def stream_llm_response(
 
         model_name = get_config_value("model", DEFAULT_LITELLM_MODEL)
         
-        # Determine API base for this specific model_name
+        # Determine the API base for this specific model_name
+        # 1. Check model-specific configuration (MODEL_CONFIGURATIONS or ollama/lm_studio defaults via get_model_test_expectations)
         model_expectations = get_model_test_expectations(model_name)
-        api_base_url = model_expectations.get("api_base")
-        if api_base_url is None: # Fallback to global LITELLM_API_BASE if model-specific one is not set
-            api_base_url = get_config_value("api_base", DEFAULT_LITELLM_API_BASE)
+        api_base_from_model_config = model_expectations.get("api_base")
+
+        # 2. Check for a globally configured API base (e.g., LITELLM_API_BASE env var or /set api_base)
+        #    If LITELLM_API_BASE env var is not set and no runtime override, this will be None.
+        globally_configured_api_base = get_config_value("api_base", None) # Pass None as default to see if it's truly set
+
+        api_base_url: Optional[str]
+        if api_base_from_model_config is not None:
+            # Priority 1: Model-specific API base from its configuration.
+            # This handles explicit api_base in MODEL_CONFIGURATIONS (can be a URL or None),
+            # and defaults for "ollama_chat/" or "lm_studio/" prefixes.
+            api_base_url = api_base_from_model_config
+        elif globally_configured_api_base is not None:
+            # Priority 2: A globally configured API base is set (e.g., for a proxy).
+            # Use this if the model didn't have its own specific api_base.
+            api_base_url = globally_configured_api_base
+        else:
+            # Priority 3: No model-specific and no global API base configured.
+            # This implies a direct provider call using API keys, so api_base should be None.
+            api_base_url = None
 
         reasoning_style = str(get_config_value("reasoning_style", DEFAULT_REASONING_STYLE)).lower()
         max_tokens_raw = get_config_value("max_tokens", DEFAULT_LITELLM_MAX_TOKENS)
