@@ -15,6 +15,7 @@ from src.config_utils import (
     DEFAULT_LITELLM_MODEL_ROUTING,
     DEFAULT_LITELLM_MODEL_TOOLS,
     DEFAULT_LITELLM_MODEL_CODING,
+    DEFAULT_LM_STUDIO_API_BASE, # Import for checking
     DEFAULT_LITELLM_MODEL_KNOWLEDGE,
     DEFAULT_REASONING_EFFORT,
     DEFAULT_REASONING_STYLE
@@ -706,6 +707,10 @@ def _perform_api_call_for_test(model_name_to_test: str, messages: list, api_base
         "timeout": timeout_val,
         **completion_kwargs
     }
+    # If the target API base is LM Studio, add a dummy API key
+    if api_base_for_call == DEFAULT_LM_STUDIO_API_BASE:
+        call_args["api_key"] = "dummy"
+
     if tools_list:
         call_args["tools"] = tools_list
     return completion(**call_args)

@@ -5,9 +5,12 @@ from typing import Dict, Any, Union, Tuple, Optional
 from dotenv import load_dotenv
 
 # Default LiteLLM configuration values - LITELLM_MODEL serves as LITELLM_MODEL_DEFAULT
-DEFAULT_LITELLM_MODEL = "ollama_chat/deepcoder:14b-preview-q8_0"
-DEFAULT_LITELLM_API_BASE = "http://localhost:11434"
-DEFAULT_LITELLM_MAX_TOKENS = 8192  # For models which context window size is unknown
+DEFAULT_OLLAMA_API_BASE = "http://localhost:11434"
+DEFAULT_LM_STUDIO_API_BASE = "http://localhost:1234/v1"
+DEFAULT_LITELLM_API_BASE = DEFAULT_LM_STUDIO_API_BASE
+DEFAULT_LITELLM_MODEL = "ollama_chat/deepcoder:14b-preview-q8_0" # Example, adjust as needed
+DEFAULT_LITELLM_MAX_TOKENS = 32768  # For models which context window size is unknown
+
 
 # Defaults for specialized models. Users should override these via .env for optimal use.
 DEFAULT_LITELLM_MODEL_ROUTING = "ollama_chat/gemma3:4b-it-qat" # Often a smaller, faster model
@@ -158,6 +161,13 @@ MODEL_CONFIGURATIONS: Dict[str, Dict[str, Any]] = {
     "ollama_chat/qwq": {
         "context_window": 131072,
         "supports_tools": True,
+        "is_thinking_model": True,
+        "thinking_type": "qwen"
+    },
+
+    "lm_studio/deepseek-r1-0528-qwen3-8b@q8_0": {
+        "context_window": 131072,
+        "supports_tools": False,
         "is_thinking_model": True,
         "thinking_type": "qwen"
     },
@@ -355,4 +365,3 @@ MODEL_CONTEXT_WINDOWS.update({ # Add defaults for role-based models if not expli
     DEFAULT_LITELLM_MODEL_CODING: get_model_test_expectations(DEFAULT_LITELLM_MODEL_CODING)["context_window"],
     DEFAULT_LITELLM_MODEL_KNOWLEDGE: get_model_test_expectations(DEFAULT_LITELLM_MODEL_KNOWLEDGE)["context_window"],
 })
-

@@ -13,7 +13,8 @@ from litellm import completion
 
 from src.tool_defs import tools, RISKY_TOOLS
 from src.config_utils import (
-    get_config_value, DEFAULT_LITELLM_MODEL, DEFAULT_LITELLM_API_BASE,
+    get_config_value, DEFAULT_LITELLM_MODEL,
+    DEFAULT_LITELLM_API_BASE, DEFAULT_LM_STUDIO_API_BASE, # Import for checking
     DEFAULT_REASONING_STYLE, DEFAULT_LITELLM_MAX_TOKENS, DEFAULT_REASONING_EFFORT,
     MAX_FILE_SIZE_BYTES
 )
@@ -188,20 +189,26 @@ def stream_llm_response(
         })
 
         console.print("\n[bold bright_blue]🔍 Seeking...[/bold bright_blue]")
+
+        completion_params = {
+            "model": model_name,
+            "messages": messages_for_api_call,
+            "tools": tools,
+            "max_tokens": max_tokens,
+            "api_base": api_base_url,
+            "temperature": temperature,
+            "stream": True
+        }
+
+        # If the target API base is LM Studio, add a dummy API key
+        if api_base_url == DEFAULT_LM_STUDIO_API_BASE:
+            completion_params["api_key"] = "dummy"
+
         reasoning_content_accumulated = ""
         final_content = ""
         tool_calls = []
         reasoning_started_printed = False
-
-        stream = completion(
-            model=model_name,
-            messages=messages_for_api_call,
-            tools=tools,
-            max_tokens=max_tokens,
-            api_base=api_base_url,
-            temperature=temperature,
-            stream=True
-        )
+        stream = completion(**completion_params)
 
         for chunk in stream:
             delta = chunk.choices[0].delta
