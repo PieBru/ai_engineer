@@ -119,6 +119,22 @@ Software Engineer AI Assistant supports several command-line options to customiz
 *   `--time`: Enable timestamp display in the user prompt from the start.
 *   `--test-inference [MODEL_PATTERN]`: Test capabilities. If `MODEL_PATTERN` (wildcards `*` and `?` supported) is provided, tests matching models. Otherwise, tests all models from `MODEL_CONTEXT_WINDOWS` and configured roles. Exits after testing.
 
+### **Runtime Commands**
+Software Engineer AI Assistant offers a variety of runtime commands to manage your session, configure settings, and access help. For detailed information on any specific command, use the `/help {command_name}` feature. For example, `/help set` will display detailed usage for the `/set` command.
+
+Help files are typically located in a `help/` directory. The assistant attempts to load a requested help file (e.g., `topic.md` for `/help topic`, or `help.md` for `/help`) by first checking in a `help/` subdirectory relative to its own installation path (system-level help). If the file is not found there, it then checks for the same file within a `help/` subdirectory in the current working directory (project-specific or user-level help). If a specific topic isn't found in either location, the assistant will attempt to show the default `help.md` page, again checking both locations.
+
+The main help page, which lists all available commands, can be accessed with `/help`.
+
+Common runtime commands include:
+*   `/add`: Add files or folders to the conversation context.
+*   `/set`: Configure session parameters like the model or reasoning style.
+*   `/rules`: Manage the AI's system prompt or guiding rules.
+*   `/context` (or `/session`): Save, load, or list conversation contexts.
+*   `/shell`: Execute shell commands.
+*   `/test`: Run diagnostic tests.
+*   And more! Use `/help` to see the full list.
+
 ### Usage Examples
 
 #### **Natural Conversation with Automatic File Operations**
@@ -182,8 +198,8 @@ You> Now review this codebase structure
 - Real-time reasoning visibility during processing
 - Enhanced problem-solving capabilities
 
-#### **Key Configuration Options (Primarily via Environment Variables):**
-Configuration is primarily managed through environment variables. If an environment variable is not set, a default value defined as a constant in the application code (e.g., `si_engineer.py`) will be used. These settings can also be adjusted at runtime using the `/set` command.
+#### **Key Configuration Options (Primarily via Environment Variables or `.env`):**
+Configuration is primarily managed through environment variables. If an environment variable is not set, a default value defined as a constant in the application code (e.g., `ai_engineer.py`) will be used. Some settings can also be adjusted at runtime using the `/set` command.
 
 *   **`LITELLM_MODEL`**: Specifies the language model.
     *   Environment Variable: `LITELLM_MODEL`
@@ -202,25 +218,6 @@ Configuration is primarily managed through environment variables. If an environm
     *   Environment Variable: `REASONING_EFFORT`
     *   Possible values: `low`, `medium`, `high`
     *   Default: `"medium"` (hardcoded in the application)
-
-*   **Runtime Configuration (`/set` command)**: Many of these settings, along with others, can be adjusted during a session using the `/set <option_name> <value>` command. This allows for dynamic control over the AI's behavior. Available options for `/set` include:
-    *   `model`: Change the language model (e.g., `/set model gpt-4o`).
-    *   `api_base`: Update the API base URL (e.g., `/set api_base https://api.example.com/v1`).
-    *   `reasoning_style`: Adjust reasoning verbosity (`full`, `compact`, `silent`) (e.g., `/set reasoning_style compact`).
-    *   `max_tokens`: Set maximum response tokens (e.g., `/set max_tokens 2048`).
-    *   `reasoning_effort`: Control reasoning depth (`low`, `medium`, `high`) (e.g., `/set reasoning_effort high`).
-    *   `reply_effort`: Define the desired effort/detail in AI replies (e.g., `/set reply_effort high`).
-    *   `temperature`: Adjust model creativity/randomness, typically a float (e.g., `/set temperature 0.7`).
-
-*   **Rule Management (`/rules` command)**: Manage the AI's guiding rules.
-    *   `show`: Display the current system prompt (rules) being used.
-    *   `list`: List available rule files in the `./.aie_rules/` directory.
-    *   `add <rule-file>`: Add rules from a specified markdown file to the current session's system prompt.
-    *   `reset`: Empties the current system prompt, then asks for confirmation (Y/n, default Y) to load default rules from `./.aie_rules/_default.md`. If confirmed, it effectively runs `rules add _default.md`.
-
-*   **Testing Utilities (`/test` command)**:
-    *   `/test all`: Runs all available diagnostic tests (currently, this executes the inference test).
-    *   `/test inference [model_pattern]`: Performs capability tests. If `model_pattern` (wildcards `*` and `?` supported) is provided, tests matching models. Otherwise, performs the same comprehensive checks as the `--test-inference` CLI option (when no pattern is provided), testing all known/configured models.
 
 ### **High-Level Architecture**
 The following diagram illustrates the main components and their interactions within Software Engineer AI Assistant:
