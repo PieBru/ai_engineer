@@ -16,6 +16,7 @@ from src.config_utils import (
     DEFAULT_LITELLM_MODEL_TOOLS,
     DEFAULT_LITELLM_MODEL_CODING,
     DEFAULT_LM_STUDIO_API_BASE, # Import for checking
+    DEFAULT_LITELLM_MODEL_SUMMARIZE,
     DEFAULT_LITELLM_MODEL_KNOWLEDGE,
     DEFAULT_LITELLM_MODEL_PLANNER,
     DEFAULT_LITELLM_MODEL_TASK_MANAGER,
@@ -33,6 +34,7 @@ LITELLM_MODEL_DEFAULT = LITELLM_MODEL # Alias for clarity, LITELLM_MODEL is the 
 LITELLM_MODEL_ROUTING = os.getenv("LITELLM_MODEL_ROUTING", DEFAULT_LITELLM_MODEL_ROUTING)
 LITELLM_MODEL_TOOLS = os.getenv("LITELLM_MODEL_TOOLS", DEFAULT_LITELLM_MODEL_TOOLS)
 LITELLM_MODEL_CODING = os.getenv("LITELLM_MODEL_CODING", DEFAULT_LITELLM_MODEL_CODING)
+LITELLM_MODEL_SUMMARIZE = os.getenv("LITELLM_MODEL_SUMMARIZE", DEFAULT_LITELLM_MODEL_SUMMARIZE)
 LITELLM_MODEL_KNOWLEDGE = os.getenv("LITELLM_MODEL_KNOWLEDGE", DEFAULT_LITELLM_MODEL_KNOWLEDGE)
 LITELLM_MODEL_PLANNER = os.getenv("LITELLM_MODEL_PLANNER", DEFAULT_LITELLM_MODEL_PLANNER)
 LITELLM_MODEL_TASK_MANAGER = os.getenv("LITELLM_MODEL_TASK_MANAGER", DEFAULT_LITELLM_MODEL_TASK_MANAGER)
@@ -119,13 +121,20 @@ def try_handle_add_command(user_input: str) -> bool:
     path_to_add = ""
     if stripped_input.lower().startswith(prefix_with_space):
         path_to_add = stripped_input[len(prefix_with_space):].strip()
+        if path_to_add.lower() == "help":
+            console.print("[yellow]Usage: /add <file_path_or_folder_path>[/yellow]")
+            console.print("[yellow]  Example: /add src/my_file.py[/yellow]")
+            console.print("[yellow]  Example: /add ./my_project_folder[/yellow]")
+            return True
     elif stripped_input.lower() == command_prefix:
         path_to_add = ""
+
     if not path_to_add:
         console.print("[yellow]Usage: /add <file_path_or_folder_path>[/yellow]")
         console.print("[yellow]  Example: /add src/my_file.py[/yellow]")
         console.print("[yellow]  Example: /add ./my_project_folder[/yellow]") # Keep this line
         return True
+
     try:
         normalized_path = normalize_path(path_to_add)
         if os.path.isdir(normalized_path):
@@ -152,12 +161,20 @@ def try_handle_set_command(user_input: str) -> bool:
     command_body = ""
     if stripped_input.lower().startswith(prefix_with_space):
         command_body = stripped_input[len(prefix_with_space):].strip()
+        if command_body.lower() == "help":
+            console.print("[yellow]Usage: /set <parameter> <value>[/yellow]")
+            console.print("[yellow]  Example: /set model gpt-4o[/yellow]")
+            console.print("[yellow]Available parameters to set:[/yellow]")
+            for p_name, p_config in SUPPORTED_SET_PARAMS.items():
+                console.print(f"  [bright_cyan]{p_name}[/bright_cyan]: {p_config['description']}")
+                if "allowed_values" in p_config:
+                    console.print(f"    Allowed: {', '.join(p_config['allowed_values'])}")
+            return True
+
     if not command_body:
         console.print("[yellow]Available parameters to set:[/yellow]")
         for p_name, p_config in SUPPORTED_SET_PARAMS.items():
             console.print(f"  [bright_cyan]{p_name}[/bright_cyan]: {p_config['description']}")
-            if "allowed_values" in p_config:
-                console.print(f"    Allowed: {', '.join(p_config['allowed_values'])}")
         console.print("\n[yellow]Usage: /set <parameter> <value>[/yellow]")
         console.print("[yellow]  Example: /set model gpt-4o[/yellow]")
         return True
@@ -388,6 +405,15 @@ def try_handle_rules_command(user_input: str) -> bool:
     parts = command_body.split(maxsplit=1)
     sub_command = parts[0].lower() if parts else ""
     arg = parts[1] if len(parts) > 1 else ""
+
+    if command_body.lower() == "help" or sub_command == "help":
+        console.print("[yellow]Usage: /rules <show|list|add|reset> [arguments][/yellow]")
+        console.print("[yellow]  show                - Display the current system prompt (rules).[/yellow]")
+        console.print("[yellow]  list                - List available rule files in ./.aie_rules/.[/yellow]")
+        console.print("[yellow]  add <rule-file>     - Add rules from a file to the system prompt.[/yellow]")
+        console.print("[yellow]  reset               - Reset system prompt to default, optionally load ./.aie_rules/_default.md.[/yellow]")
+        return True
+
     if sub_command == "show":
         console.print("\n[bold blue]📚 Current System Prompt (Rules):[/bold blue]")
         if conversation_history and conversation_history[0]["role"] == "system":
@@ -481,6 +507,15 @@ def try_handle_context_command(user_input: str) -> bool:
     parts = command_body.split(maxsplit=1)
     sub_command = parts[0].lower() if parts else ""
     arg = parts[1] if len(parts) > 1 else ""
+
+    if command_body.lower() == "help" or sub_command == "help":
+        console.print("[yellow]Usage: /context <save|load|list|summarize> [name/path][/yellow]")
+        console.print("[yellow]  save <name>     - Save current context to a file.[/yellow]")
+        console.print("[yellow]  load <name>     - Load context from a file.[/yellow]")
+        console.print("[yellow]  list [path]     - List saved contexts in a directory.[/yellow]")
+        console.print("[yellow]  summarize       - Summarize current context using the LLM.[/yellow]")
+        return True
+
     if sub_command == "save":
         if not arg:
             console.print("[yellow]Usage: /context save <name>[/yellow]")
@@ -652,6 +687,13 @@ def try_handle_prompt_command(user_input: str) -> bool:
     parts = command_body.split(maxsplit=1)
     sub_command = parts[0].lower() if parts else ""
     text_to_process = parts[1] if len(parts) > 1 else ""
+
+    if command_body.lower() == "help" or sub_command == "help":
+        console.print("[yellow]Usage: /prompt <refine|detail> <text>[/yellow]")
+        console.print("[yellow]  refine <text>  - Optimizes <text> into a clearer and more effective prompt for Software Engineer AI Assistant.[/yellow]")
+        console.print("[yellow]  detail <text>  - Expands <text> into a more comprehensive and detailed prompt for Software Engineer AI Assistant.[/yellow]")
+        return True
+
     if sub_command in ["refine", "detail"]:
         if not text_to_process:
             console.print(f"[yellow]Usage: /prompt {sub_command} <text_to_{sub_command}>[/yellow]")
@@ -961,6 +1003,7 @@ def test_inference_endpoint(specific_model_name: str = None):
         {"label": "TOOLS",     "name_var": LITELLM_MODEL_TOOLS,     "expect_tools": True},
         {"label": "CODING",    "name_var": LITELLM_MODEL_CODING,    "expect_tools": False},
         {"label": "KNOWLEDGE", "name_var": LITELLM_MODEL_KNOWLEDGE, "expect_tools": False},
+        {"label": "SUMMARIZE", "name_var": LITELLM_MODEL_SUMMARIZE, "expect_tools": False},
         {"label": "PLANNER",   "name_var": LITELLM_MODEL_PLANNER,   "expect_tools": False},
         {"label": "TASK_MGR",  "name_var": LITELLM_MODEL_TASK_MANAGER, "expect_tools": False},
         {"label": "RULE_ENH",  "name_var": LITELLM_MODEL_RULE_ENHANCER, "expect_tools": False},
@@ -1190,26 +1233,25 @@ def main():
     current_model_name_for_display = get_config_value("model", LITELLM_MODEL_DEFAULT)
     # Use get_model_context_window for display, as it's simpler for this purpose
     context_window_size_display, used_default_display = get_model_context_window(current_model_name_for_display, return_match_status=True)
-    context_window_display_str = f"{context_window_size_display // 1000}k tokens"
+    context_window_display_str = f"Context:{context_window_size_display // 1024}k tokens"
     current_working_directory = os.getcwd()
     if used_default_display:
         context_window_display_str += " (default)"
         
-    instructions = f"""🧠 Default Model: [bold magenta]{current_model_name_for_display}[/bold magenta] ([dim]{context_window_display_str}[/dim])
+    instructions = f"""📁 [bold bright_blue]Current Directory: [/bold bright_blue][bold green]{current_working_directory}[/bold green]
+
+🧠 [bold bright_blue]Default Model: [/bold bright_blue][bold magenta]{current_model_name_for_display}[/bold magenta] ([dim]{context_window_display_str}[/dim])
    Routing: [dim]{LITELLM_MODEL_ROUTING or 'Not Set'}[/dim] | Tools: [dim]{LITELLM_MODEL_TOOLS or 'Not Set'}[/dim]
    Coding: [dim]{LITELLM_MODEL_CODING or 'Not Set'}[/dim] | Knowledge: [dim]{LITELLM_MODEL_KNOWLEDGE or 'Not Set'}[/dim]
-   📁 Current Directory: [bold green]{current_working_directory}[/bold green]
-   Planner: [dim]{LITELLM_MODEL_PLANNER or 'Not Set'}[/dim] | Task Mgr: [dim]{LITELLM_MODEL_TASK_MANAGER or 'Not Set'}[/dim]
-   Rule Enh: [dim]{LITELLM_MODEL_RULE_ENHANCER or 'Not Set'}[/dim]
-   Prompt Enh: [dim]{LITELLM_MODEL_PROMPT_ENHANCER or 'Not Set'}[/dim]
-   Workflow Mgr: [dim]{LITELLM_MODEL_WORKFLOW_MANAGER or 'Not Set'}[/dim]
+   Summarize: [dim]{LITELLM_MODEL_SUMMARIZE or 'Not Set'}[/dim] | Planner: [dim]{LITELLM_MODEL_PLANNER or 'Not Set'}[/dim]
+   Task Mgr: [dim]{LITELLM_MODEL_TASK_MANAGER or 'Not Set'}[/dim] | Rule Enh: [dim]{LITELLM_MODEL_RULE_ENHANCER or 'Not Set'}[/dim]
+   Prompt Enh: [dim]{LITELLM_MODEL_PROMPT_ENHANCER or 'Not Set'}[/dim] | Workflow Mgr: [dim]{LITELLM_MODEL_WORKFLOW_MANAGER or 'Not Set'}[/dim]
 
-
-[bold bright_blue]▶️ Commands:[/bold bright_blue]
+📌 [bold bright_blue]Main Commands:[/bold bright_blue]
   • [bright_cyan]/exit[/bright_cyan] or [bright_cyan]/quit[/bright_cyan] - End the session.
   • [bright_cyan]/help[/bright_cyan] - Display detailed help.
 
-[bold white]👥 Just ask naturally, like you are communicating with a colleague.[/bold white]"""
+👥 [bold white]Just ask naturally, like you are explaining to a colleague.[/bold white]"""
     console.print(Panel(
         instructions,
         border_style="blue",
@@ -1310,6 +1352,11 @@ def try_handle_script_command(user_input: str, is_startup_script: bool = False) 
     if stripped_input.lower().startswith(prefix_with_space):
         script_path_arg = stripped_input[len(prefix_with_space):].strip()
     elif is_startup_script and stripped_input.lower() == command_prefix:
+        # This case is for when --script is used without a path, which is an error handled by argparse
+        # but if it somehow reached here, show specific usage.
+        console.print("[yellow]Usage: --script <script_path>[/yellow]")
+        return True
+    if script_path_arg.lower() == "help":
         console.print("[yellow]Usage: --script <script_path>[/yellow]")
         return True
     if not script_path_arg:
@@ -1344,6 +1391,9 @@ def try_handle_ask_command(user_input: str) -> bool:
     text_to_ask = ""
     if stripped_input.lower().startswith(prefix_with_space):
         text_to_ask = stripped_input[len(prefix_with_space):].strip()
+        if text_to_ask.lower() == "help":
+            console.print("[yellow]Usage: /ask <text>[/yellow]\n[yellow]  Example: /ask What is the capital of France?[/yellow]")
+            return True
     elif stripped_input.lower() == command_prefix:
         console.print("[yellow]Usage: /ask <text>[/yellow]\n[yellow]  Example: /ask What is the capital of France?[/yellow]")
         return True
@@ -1355,6 +1405,10 @@ def try_handle_time_command(user_input: str) -> bool:
     global SHOW_TIMESTAMP_IN_PROMPT
     command_name_lower = "/time"
     if user_input.strip().lower() == command_name_lower:
+        # No arguments for /time, so "help" doesn't apply in the same way.
+        # It's a toggle. If a user types "/time help", it will be treated as an invalid command
+        # by the main loop, which is acceptable for a simple toggle.
+        # If explicit help was desired, we'd need to check for "/time help" specifically.
         SHOW_TIMESTAMP_IN_PROMPT = not SHOW_TIMESTAMP_IN_PROMPT
         if SHOW_TIMESTAMP_IN_PROMPT:
             console.print("[green]✓ Timestamp display in prompt: ON[/green]")
@@ -1374,6 +1428,13 @@ def try_handle_test_command(user_input: str) -> bool:
         command_body = stripped_input[len(prefix_with_space):].strip()
     parts = command_body.split(maxsplit=1)
     sub_command = parts[0].lower() if parts else ""
+
+    if command_body.lower() == "help" or sub_command == "help":
+        console.print("[yellow]Usage: /test <subcommand> [arguments][/yellow]")
+        console.print("[yellow]  all         - Run all available tests (currently runs 'inference' for all known/configured models).[/yellow]")
+        console.print("[yellow]  inference [model_pattern] - Test capabilities. If model_pattern (wildcards * and ? supported) is provided, tests matching models. Otherwise, tests all known/configured models.[/yellow]")
+        return True
+
     if sub_command == "inference":
         model_to_test = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
         if model_to_test: # This was specific_model_name before, now model_to_test
