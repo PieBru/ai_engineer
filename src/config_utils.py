@@ -153,7 +153,7 @@ MODEL_CONFIGURATIONS: Dict[str, Dict[str, Any]] = {
     },
     "ollama_chat/qwen3:32b": {
         "context_window": 40000,
-        "supports_tools": False,  # Should be True, but ollama 0.9.0 has memory allocation problems with this test enabled.
+        "supports_tools": True,
         "is_thinking_model": True,
         "thinking_type": "qwen",  # Use <think> ... </think>
         "api_base": DEFAULT_OLLAMA_API_BASE
@@ -184,7 +184,7 @@ MODEL_CONFIGURATIONS: Dict[str, Dict[str, Any]] = {
     },
     "ollama_chat/qwq": {
         "context_window": 131072,
-        "supports_tools": False,  # Should be True, but ollama 0.9.0 has memory allocation problems with this test enabled.
+        "supports_tools": True,
         "is_thinking_model": True,
         "thinking_type": "qwen",
         "api_base": DEFAULT_OLLAMA_API_BASE # Or "http://specific-ollama-server:11434"
