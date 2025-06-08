@@ -7,20 +7,21 @@ from dotenv import load_dotenv
 # Default LiteLLM configuration values - LITELLM_MODEL serves as LITELLM_MODEL_DEFAULT
 DEFAULT_OLLAMA_API_BASE = "http://localhost:11434"
 DEFAULT_LM_STUDIO_API_BASE = "http://localhost:1234/v1"
-DEFAULT_LITELLM_MODEL = "ollama_chat/deepcoder:14b-preview-q8_0" # Example, adjust as needed
+DEFAULT_LITELLM_MAX_TOKENS = 4096  # Example, adjust as needed
 DEFAULT_LITELLM_MAX_TOKENS = 32768  # For models which context window size is unknown
 
 # Defaults for specialized models. Users should override these via .env for optimal use.
-DEFAULT_LITELLM_MODEL_ROUTING =          "ollama_chat/gemma3:4b-it-qat" # Often a smaller, faster model
+DEFAULT_LITELLM_MODEL =                  "ollama_chat/mistral-small"
+DEFAULT_LITELLM_MODEL_ROUTING =          "ollama_chat/qwen3:4b" # Often a smaller, faster model
 DEFAULT_LITELLM_MODEL_TOOLS =            DEFAULT_LITELLM_MODEL # A good tool calls handler
-DEFAULT_LITELLM_MODEL_CODING =           DEFAULT_LITELLM_MODEL # Specialized coding model, also "deepseek/deepseek-reasoner" (SOTA 2025, slower, more expensive)
-DEFAULT_LITELLM_MODEL_KNOWLEDGE =        "ollama_chat/gemma3:27b-it-qat" # For general knowledge
-DEFAULT_LITELLM_MODEL_SUMMARIZE =        DEFAULT_LITELLM_MODEL_KNOWLEDGE # For text summarization
-DEFAULT_LITELLM_MODEL_PLANNER =          DEFAULT_LITELLM_MODEL_KNOWLEDGE # For planning complex tasks
-DEFAULT_LITELLM_MODEL_TASK_MANAGER =     DEFAULT_LITELLM_MODEL_KNOWLEDGE # For breaking down tasks
-DEFAULT_LITELLM_MODEL_RULE_ENHANCER =    DEFAULT_LITELLM_MODEL_KNOWLEDGE # For refining rules/prompts
-DEFAULT_LITELLM_MODEL_PROMPT_ENHANCER =  DEFAULT_LITELLM_MODEL_KNOWLEDGE # For enhancing user prompts
-DEFAULT_LITELLM_MODEL_WORKFLOW_MANAGER = DEFAULT_LITELLM_MODEL_KNOWLEDGE # For managing multi-step workflows
+DEFAULT_LITELLM_MODEL_CODING =           "ollama_chat/devstral" # Specialized coding model, also "deepseek/deepseek-reasoner" (SOTA 2025, slower, more expensive)
+DEFAULT_LITELLM_MODEL_KNOWLEDGE =        DEFAULT_LITELLM_MODEL # For general knowledge
+DEFAULT_LITELLM_MODEL_SUMMARIZE =        DEFAULT_LITELLM_MODEL # For text summarization
+DEFAULT_LITELLM_MODEL_PLANNER =          DEFAULT_LITELLM_MODEL # For planning complex tasks
+DEFAULT_LITELLM_MODEL_TASK_MANAGER =     DEFAULT_LITELLM_MODEL # For breaking down tasks
+DEFAULT_LITELLM_MODEL_RULE_ENHANCER =    DEFAULT_LITELLM_MODEL # For refining rules/prompts
+DEFAULT_LITELLM_MODEL_PROMPT_ENHANCER =  DEFAULT_LITELLM_MODEL # For enhancing user prompts
+DEFAULT_LITELLM_MODEL_WORKFLOW_MANAGER = DEFAULT_LITELLM_MODEL # For managing multi-step workflows
 
 # Default UI and Reasoning configuration values
 DEFAULT_REASONING_EFFORT = "medium"  # Possible values: "low", "medium", "high"
@@ -71,7 +72,13 @@ MODEL_CONFIGURATIONS: Dict[str, Dict[str, Any]] = {
     # "gemini/gemini-2.5-flash": 128000,  # Assuming similar to 2.0 Flash or potentially larger
     # "gemini/gemini-2.5-pro": 1048576,   # Assuming it matches or aims for Gemini 1.5 Pro's scale
 
-    "ollama_chat/devstral": {  # https://mistral.ai/news/devstral
+    "ollama_chat/mistral-small": {  # https://ollama.com/library/mistral-small:24b
+        "context_window": 32768,
+        "supports_tools": True,
+        "is_thinking_model": False,
+        "api_base": DEFAULT_OLLAMA_API_BASE
+    },
+    "ollama_chat/devstral": {  # https://ollama.com/library/devstral
         "context_window": 131072,
         "supports_tools": False,
         "is_thinking_model": False,

@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
+ 
 """
 Software Engineer AI Assistant: An AI-powered coding assistant.
 
 This script provides an interactive terminal interface for code development,
 leveraging AI's reasoning models for intelligent file operations,
 code analysis, and development assistance via natural conversation and function calling.
+
+Original source: https://github.com/PieBru/ai_engineer
 """
 
 # --- BEGIN VIRTUAL ENVIRONMENT CHECK ---
@@ -98,7 +101,8 @@ from src.config_utils import (
     DEFAULT_LITELLM_MODEL_PROMPT_ENHANCER,
     DEFAULT_LITELLM_MODEL_WORKFLOW_MANAGER,
     DEFAULT_REASONING_EFFORT,
-    DEFAULT_REASONING_STYLE
+    DEFAULT_REASONING_STYLE,
+    get_model_test_expectations # Added for routing model API base resolution
 )
 
 # Now, define module-level configurations using these defaults
@@ -125,6 +129,7 @@ from pydantic import BaseModel, ConfigDict
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table # For risky tool confirmation
+from rich.json import JSON as RichJSON # Added for debug logging
 from prompt_toolkit import PromptSession
 import time # For tool call IDs and test inference timing
 import subprocess # For /shell command
@@ -149,7 +154,7 @@ from src.file_utils import (
     create_file as util_create_file, apply_diff_edit as util_apply_diff_edit
 )
 from src.tool_defs import tools, RISKY_TOOLS
-from src.prompts import system_PROMPT, RichMarkdown # Moved RichMarkdown import here
+from src.prompts import system_PROMPT, RichMarkdown, ROUTING_SYSTEM_PROMPT # Added ROUTING_SYSTEM_PROMPT
 from src.data_models import FileToCreate, FileToEdit # Import new models
 from src.network_utils import handle_local_mcp_stream, handle_remote_mcp_sse # Import network utils
 # Import new modules for refactored logic
@@ -161,6 +166,7 @@ from src.llm_interaction import stream_llm_response # Removed execute_function_c
 from prompt_toolkit.styles import Style as PromptStyle
 from litellm import completion, token_counter
 import litellm 
+import re # Add this import
 import logging # type: ignore
 from typing import Dict, Any, Optional
 
@@ -176,6 +182,7 @@ prompt_session = PromptSession(
 )
 
 SHOW_TIMESTAMP_IN_PROMPT = False
+DEBUG_LLM_INTERACTIONS = False # New global flag for LLM interaction debugging
 load_app_configuration(console)
 
 litellm.suppress_debug_info = True
@@ -210,7 +217,7 @@ def try_handle_add_command(user_input: str) -> bool:
     try:
         normalized_path = normalize_path(path_to_add)
         if os.path.isdir(normalized_path):
-            add_directory_to_conversation(normalized_path)
+            add_directory_to_conversation(normalized_path, conversation_history, console)
         else:
             content = util_read_local_file(normalized_path)
             conversation_history.append({ # type: ignore
@@ -683,17 +690,62 @@ def summarize_context():
         {"role": "user", "content": "Please provide a concise summary of our conversation so far. Focus on the key topics discussed, decisions made, and actions taken (like file operations). This summary will replace the detailed history."}
     ]
     summary_messages.extend(conversation_history[1:])
+    
+    model_name = get_config_value("model_summarize", DEFAULT_LITELLM_MODEL_SUMMARIZE)
+    model_expectations = get_model_test_expectations(model_name)
+    api_base_from_model_config = model_expectations.get("api_base")
+    globally_configured_api_base = get_config_value("api_base", None)
+    api_base_url: Optional[str]
+    if api_base_from_model_config is not None:
+        api_base_url = api_base_from_model_config
+    elif globally_configured_api_base is not None:
+        api_base_url = globally_configured_api_base
+    else:
+        api_base_url = None
+
+    completion_args_summary: Dict[str, Any] = {
+        "model": model_name,
+        "messages": summary_messages,
+        "temperature": 0.3,
+        "max_tokens": 1024,
+        "api_base": api_base_url, # Use the resolved API base
+        "stream": False
+    }
+    if model_name.startswith("lm_studio/"):
+        completion_args_summary["api_key"] = "dummy"
+
     try:
-        model_name = get_config_value("model", "ollama_chat/devstral")
-        api_base_url = get_config_value("api_base", None)
-        response = completion(
-            model=model_name,
-            messages=summary_messages,
-            temperature=0.3,
-            max_tokens=1024,
-            api_base=api_base_url,
-            stream=False
-        )
+        if DEBUG_LLM_INTERACTIONS:
+            console.print(f"[dim bold red]SUMMARY DEBUG: Request Params ({model_name}):[/dim bold red]", stderr=True)
+            debug_summary_params_log = completion_args_summary.copy()
+            if "messages" in debug_summary_params_log:
+                console.print(f"[dim bold red]SUMMARY DEBUG: Request Messages (detail):[/dim bold red]", stderr=True)
+                messages_to_log = []
+                # Log system, user instruction, a note about history, and last history message
+                if len(debug_summary_params_log["messages"]) > 3:
+                    messages_to_log.append(debug_summary_params_log["messages"][0]) # System
+                    messages_to_log.append(debug_summary_params_log["messages"][1]) # User instruction for summary
+                    messages_to_log.append({"role": "system", "content": f"... ({len(debug_summary_params_log['messages']) - 3} history messages hidden) ..."})
+                    messages_to_log.append(debug_summary_params_log["messages"][-1]) # Last history message
+                else:
+                    messages_to_log = debug_summary_params_log["messages"]
+                for i, msg in enumerate(messages_to_log):
+                    console.print(f"[dim red]Message {i}: {json.dumps(msg, indent=2, default=str)}[/dim red]", stderr=True)
+                del debug_summary_params_log["messages"] # Avoid re-printing in main JSON
+            console.print(RichJSON(json.dumps(debug_summary_params_log, indent=2, default=str)), stderr=True)
+
+        response = completion(**completion_args_summary) # Use the dict
+
+        if DEBUG_LLM_INTERACTIONS:
+            console.print(f"[dim bold red]SUMMARY DEBUG: Raw Response ({model_name}):[/dim bold red]", stderr=True)
+            # Similar response logging as in get_routing_expert_keyword
+            try:
+                debug_response_data = {"choices": [{"message": {"content": response.choices[0].message.content}, "finish_reason": response.choices[0].finish_reason}], "model": response.model, "usage": dict(response.usage)}
+                console.print(RichJSON(json.dumps(debug_response_data, indent=2, default=str)), stderr=True)
+            except Exception as e_debug:
+                console.print(f"[dim red]SUMMARY DEBUG: Error serializing response: {e_debug}[/dim red]", stderr=True)
+                console.print(f"[dim red]{response}[/dim red]", stderr=True)
+
         summary_content = response.choices[0].message.content
         if summary_content:
             console.print("\n[bold blue]Summary:[/bold blue]")
@@ -708,6 +760,9 @@ def summarize_context():
             console.print("[yellow]LLM returned an empty summary.[/yellow]\n")
     except Exception as e:
         console.print(f"[bold red]✗[/bold red] Failed to summarize context: {e}\n")
+        if DEBUG_LLM_INTERACTIONS:
+            console.print(f"[dim red]SUMMARY DEBUG: Exception: {e}[/dim red]", stderr=True)
+
 
 def _call_llm_for_prompt_generation(user_text: str, mode: str) -> str:
     console.print(f"[bold bright_blue]⚙️ Processing text for prompt {mode}ing...[/bold bright_blue]")
@@ -729,22 +784,50 @@ def _call_llm_for_prompt_generation(user_text: str, mode: str) -> str:
         {"role": "system", "content": meta_system_prompt},
         {"role": "user", "content": user_query}
     ]
+    
+    model_name = get_config_value("model_prompt_enhancer", DEFAULT_LITELLM_MODEL_PROMPT_ENHANCER)
+    model_expectations = get_model_test_expectations(model_name)
+    api_base_from_model_config = model_expectations.get("api_base")
+    globally_configured_api_base = get_config_value("api_base", None)
+    api_base_url: Optional[str]
+    if api_base_from_model_config is not None:
+        api_base_url = api_base_from_model_config
+    elif globally_configured_api_base is not None:
+        api_base_url = globally_configured_api_base
+    else:
+        api_base_url = None
+        
+    max_tokens_val = get_config_value("max_tokens", DEFAULT_LITELLM_MAX_TOKENS)
+
+    completion_args_prompt_gen: Dict[str, Any] = dict(
+        model=model_name,
+        messages=messages,
+        temperature=0.15,
+        max_tokens=max_tokens_val,
+        api_base=api_base_url,
+        stream=False
+    )
+    if model_name.startswith("lm_studio/"):
+        completion_args_prompt_gen["api_key"] = "dummy"
+
     try:
-        model_name = get_config_value("model", "ollama_chat/devstral")
-        api_base_url = get_config_value("api_base", None)
-        max_tokens_val = get_config_value("max_tokens", 2048)
-        response = completion(
-            model=model_name,
-            messages=messages,
-            temperature=0.5,
-            max_tokens=max_tokens_val,
-            api_base=api_base_url,
-            stream=False
-        )
+        if DEBUG_LLM_INTERACTIONS:
+            console.print(f"[dim bold red]PROMPT_GEN DEBUG: Request Params ({model_name}):[/dim bold red]", stderr=True)
+            debug_prompt_gen_params_log = completion_args_prompt_gen.copy()
+            if "messages" in debug_prompt_gen_params_log: # Messages are short here
+                console.print(f"[dim bold red]PROMPT_GEN DEBUG: Request Messages (detail):[/dim bold red]", stderr=True)
+                for i, msg in enumerate(debug_prompt_gen_params_log["messages"]):
+                    console.print(f"[dim red]Message {i}: {json.dumps(msg, indent=2, default=str)}[/dim red]", stderr=True)
+                del debug_prompt_gen_params_log["messages"] # Avoid re-printing
+            console.print(RichJSON(json.dumps(debug_prompt_gen_params_log, indent=2, default=str)), stderr=True)
+
+        response = completion(**completion_args_prompt_gen) # Use the dict
         generated_prompt = response.choices[0].message.content.strip()
         return generated_prompt
     except Exception as e:
         console.print(f"[bold red]✗[/bold red] Failed to generate prompt: {e}\n")
+        if DEBUG_LLM_INTERACTIONS:
+            console.print(f"[dim red]PROMPT_GEN DEBUG: Exception: {e}[/dim red]", stderr=True)
         return ""
 
 def try_handle_prompt_command(user_input: str) -> bool:
@@ -780,6 +863,208 @@ def try_handle_prompt_command(user_input: str) -> bool:
     console.print("[yellow]  detail <text>  - Expands <text> into a more comprehensive and detailed prompt for Software Engineer AI Assistant.[/yellow]")
     return True
 
+# --- BEGIN ROUTING LOGIC ---
+VALID_ROUTING_KEYWORDS = ["ROUTING_SELF", "TOOLS", "CODING", "KNOWLEDGE", "DEFAULT"]
+
+def get_routing_expert_keyword(user_query: str, current_conversation_history: list, console_obj: Console) -> str:
+    """
+    Calls the routing LLM to determine which expert should handle the user_query.
+    """
+    routing_model_name = get_config_value("model_routing", DEFAULT_LITELLM_MODEL_ROUTING)
+    if not routing_model_name:
+        console_obj.print("[yellow]Warning: Routing model not configured. Defaulting to DEFAULT expert.[/yellow]")
+        return "DEFAULT"
+
+    # Resolve API base for the routing model
+    routing_model_expectations = get_model_test_expectations(routing_model_name)
+    api_base_from_model_config = routing_model_expectations.get("api_base")
+    globally_configured_api_base = get_config_value("api_base", None)
+
+    routing_api_base: Optional[str]
+    if api_base_from_model_config is not None:
+        routing_api_base = api_base_from_model_config
+    elif globally_configured_api_base is not None:
+        routing_api_base = globally_configured_api_base
+    else:
+        routing_api_base = None
+
+    # Create a concise history snippet for the router
+    brief_history_messages = []
+    if current_conversation_history:
+        # Take last N messages (e.g., last 2 user/assistant turns = 4 messages)
+        # Exclude the initial system prompt for the router's history view
+        history_to_consider = [msg for msg in current_conversation_history if msg.get("role") != "system"]
+        last_few_turns = history_to_consider[-4:]
+        for msg in last_few_turns:
+            role = msg.get("role", "unknown").capitalize()
+            content = msg.get("content", "")
+            if isinstance(content, str) and content: # Ensure content is a non-empty string
+                brief_history_messages.append(f"{role}: {content[:150]}{'...' if len(content) > 150 else ''}")
+    history_for_router_prompt = "\n".join(brief_history_messages) if brief_history_messages else "No recent conversation history."
+
+    prompt_for_router = ROUTING_SYSTEM_PROMPT.format(
+        user_query=user_query,
+        history_snippet=history_for_router_prompt
+    )
+    
+    messages_for_routing = [{"role": "system", "content": prompt_for_router}]
+    
+    completion_params_routing: Dict[str, Any] = {
+        "model": routing_model_name,
+        "messages": messages_for_routing,
+        "temperature": 0.0,  # Deterministic routing
+        "max_tokens": 15,    # Expecting a short keyword
+        "api_base": routing_api_base,
+        "stream": False
+    }
+    if routing_model_name.startswith("lm_studio/"):
+        completion_params_routing["api_key"] = "dummy"
+
+    if DEBUG_LLM_INTERACTIONS:
+        console.print(f"[dim bold red]ROUTER DEBUG: Request Params:[/dim bold red]", stderr=True)
+        # Log messages separately for clarity, as ROUTING_SYSTEM_PROMPT can be long
+        console.print(f"[dim bold red]ROUTER DEBUG: Request Messages (detail):[/dim bold red]", stderr=True)
+        for i, msg in enumerate(completion_params_routing["messages"]):
+            console.print(f"[dim red]Message {i}: {json.dumps(msg, indent=2, default=str)}[/dim red]", stderr=True)
+        # Log other params, excluding messages if they were logged separately
+        params_to_log_separately = completion_params_routing.copy()
+        if "messages" in params_to_log_separately:
+            del params_to_log_separately["messages"]
+        console.print(RichJSON(json.dumps(params_to_log_separately, indent=2, default=str)), stderr=True)
+
+
+    try:
+        response = completion(**completion_params_routing)
+        
+        raw_response_content = response.choices[0].message.content
+        final_keyword_candidate = raw_response_content # Default to raw response
+
+        if DEBUG_LLM_INTERACTIONS:
+            console.print(f"[dim bold red]ROUTER DEBUG: Raw Response:[/dim bold red]", stderr=True)
+            try:
+                debug_response_data = {
+                    "choices": [{
+                        "message": {
+                            "content": response.choices[0].message.content if response.choices and response.choices[0].message else "N/A"
+                        },
+                        "finish_reason": response.choices[0].finish_reason if response.choices else "N/A"
+                    }],
+                    "model": response.model,
+                    "usage": dict(response.usage) if response.usage else "N/A"
+                }
+                console.print(RichJSON(json.dumps(debug_response_data, indent=2, default=str)), stderr=True)
+            except Exception as e_debug:
+                console.print(f"[dim red]ROUTER DEBUG: Error serializing response for debug: {e_debug}[/dim red]", stderr=True)
+                console.print(f"[dim red]{response}[/dim red]", stderr=True)
+        # routing_model_expectations is already defined above from resolving api_base
+        is_thinking = routing_model_expectations.get("is_thinking_model", False)
+        think_type = routing_model_expectations.get("thinking_type")
+
+        if is_thinking and think_type == "qwen":
+            temp_lower_content = raw_response_content.lower()
+            start_tag = "<think>"
+            end_tag = "</think>"
+
+            # Check if the thinking block is present at the beginning (after stripping whitespace)
+            # Find the first occurrence of the start_tag in the lowercased content
+            actual_start_tag_pos_in_lower = temp_lower_content.find(start_tag)
+
+            if actual_start_tag_pos_in_lower != -1 and \
+               (temp_lower_content[:actual_start_tag_pos_in_lower].isspace() or actual_start_tag_pos_in_lower == 0):
+                # The <think> tag is at the effective beginning of the content.
+                end_tag_pos_in_lower = temp_lower_content.find(end_tag, actual_start_tag_pos_in_lower + len(start_tag))
+
+                if end_tag_pos_in_lower != -1:
+                    # Thought block is closed, extract content after it
+                    content_after_first_think_block = raw_response_content[end_tag_pos_in_lower + len(end_tag):]
+                    
+                    # Try to find a valid keyword at the beginning of this content_after_first_think_block
+                    found_keyword_in_suffix = None
+                    # Iterate through valid keywords to see if any is a prefix of the stripped remaining content.
+                    # Keywords in VALID_ROUTING_KEYWORDS are already uppercase.
+                    # We match against the uppercase version of the suffix.
+                    stripped_upper_suffix = content_after_first_think_block.strip().upper()
+
+                    # Sort keywords by length descending to match longer keywords first (e.g. "ROUTING_SELF" before "ROUTING")
+                    # Though current keywords don't have this issue, it's good practice.
+                    sorted_valid_keywords = sorted(VALID_ROUTING_KEYWORDS, key=len, reverse=True)
+
+                    for valid_kw in sorted_valid_keywords:
+                        if stripped_upper_suffix.startswith(valid_kw):
+                            # Ensure it's a full word match, not just a prefix of a longer, invalid word.
+                            if len(stripped_upper_suffix) == len(valid_kw) or \
+                               not stripped_upper_suffix[len(valid_kw)].isalnum(): # Next char is not alphanumeric
+                                found_keyword_in_suffix = valid_kw # Matched keyword
+                                break 
+                    
+                    if found_keyword_in_suffix:
+                        final_keyword_candidate = found_keyword_in_suffix # Already uppercase
+                        console_obj.print(f"[dim]   (Thought block stripped, using keyword: '{final_keyword_candidate}')[/dim]")
+                    else:
+                        # Closed thought block, but nothing followed
+                        console_obj.print(f"[yellow]Warning: Routing LLM (thinking model) provided a closed thought block, but no valid keyword found right after. Raw suffix: '{content_after_first_think_block.strip()[:70]}...'. Defaulting.[/yellow]")
+                        final_keyword_candidate = "DEFAULT" 
+                else:
+                    # Start tag found, but no end tag
+                    console_obj.print(f"[dim]   (Qwen model: <think> found, no </think>.)[/dim]")
+                    content_after_open_think_tag = raw_response_content[actual_start_tag_pos_in_lower + len(start_tag):]
+                    
+                    found_keyword_in_unclosed_think = None
+                    stripped_upper_unclosed_suffix = content_after_open_think_tag.strip().upper()
+                    
+                    best_match_pos = -1
+                    # Sort keywords by length descending to prefer longer matches if they overlap
+                    sorted_valid_keywords_for_unclosed = sorted(VALID_ROUTING_KEYWORDS, key=len, reverse=True)
+
+                    for valid_kw in sorted_valid_keywords_for_unclosed:
+                        # Find all occurrences of valid_kw as a whole word
+                        for match in re.finditer(r'\b' + re.escape(valid_kw) + r'\b', stripped_upper_unclosed_suffix):
+                            if match.start() > best_match_pos: # Prefer keyword appearing later in the thought
+                                best_match_pos = match.start()
+                                found_keyword_in_unclosed_think = valid_kw
+                    
+                    if found_keyword_in_unclosed_think:
+                        final_keyword_candidate = found_keyword_in_unclosed_think
+                        console_obj.print(f"[dim]   (Keyword '{final_keyword_candidate}' found within unclosed <think> block.)[/dim]")
+                    else:
+                        # No keyword found within the unclosed think block.
+                        # Check if the original user_query was a simple greeting.
+                        greeting_pattern = r"^(hello|hi|hey|good\s+(morning|afternoon|evening)|how\s+are\s+you|how's\s+it\s+going|what's\s+up|sup)[\s!\.,\?]*$"
+                        is_simple_greeting = bool(re.match(greeting_pattern, user_query.strip(), re.IGNORECASE))
+
+                        if is_simple_greeting:
+                            console_obj.print(f"[dim]   (Info: Routing model produced an unclosed thought for a greeting. Defaulting to DEFAULT. Raw: '{raw_response_content[:70].strip()}...')")
+                        else:
+                            # Original warning for non-greetings or more complex inputs
+                            console_obj.print(f"[yellow]Warning: Routing LLM (thinking model) started with '{start_tag}' but no closing '{end_tag}', and no keyword found within. Raw: '{raw_response_content[:100].strip()}...'. Defaulting.[/yellow]")
+                        final_keyword_candidate = "DEFAULT"
+
+            # else: It's a qwen thinking model, but the response didn't start with <think> as expected, or <think> was not at the beginning. Process raw response.
+        
+        # Process the (potentially modified) keyword candidate
+        keyword = final_keyword_candidate.strip().upper()
+        
+        console_obj.print(f"[dim]   -> Routed to: {keyword}[/dim]") 
+
+        if keyword not in VALID_ROUTING_KEYWORDS:
+            console_obj.print(f"[yellow]Warning: Routing LLM returned unknown keyword '{keyword}'. Defaulting to DEFAULT.[/yellow]")
+            return "DEFAULT"
+        return keyword
+    except Exception as e:
+        console_obj.print(f"[red]Error during routing: {e}. Defaulting to DEFAULT expert.[/red]")
+        if DEBUG_LLM_INTERACTIONS:
+            console_obj.print(f"[dim red]ROUTER DEBUG: Exception: {e}[/dim red]", stderr=True)
+        return "DEFAULT"
+
+def map_expert_to_model(expert_keyword: str) -> str:
+    """Maps the expert keyword to the corresponding model name."""
+    if expert_keyword == "TOOLS": return get_config_value("model_tools", DEFAULT_LITELLM_MODEL_TOOLS)
+    if expert_keyword == "CODING": return get_config_value("model_coding", DEFAULT_LITELLM_MODEL_CODING)
+    if expert_keyword == "KNOWLEDGE": return get_config_value("model_knowledge", DEFAULT_LITELLM_MODEL_KNOWLEDGE)
+    # For ROUTING_SELF or any other unhandled/default cases, use the main default model.
+    return get_config_value("model", DEFAULT_LITELLM_MODEL) # LITELLM_MODEL_DEFAULT
+
+# --- END ROUTING LOGIC ---
 # --------------------------------------------------------------------------------
 # 5. Conversation state
 # --------------------------------------------------------------------------------
@@ -807,23 +1092,39 @@ def _summarize_error_message(error_message: str, summary_model_name: str, api_ba
 
     prompt = f"Summarize the following technical error message very concisely (e.g., in 5-10 words or a short phrase). Focus on the core issue:\n\n---\n{truncated_error_message}\n---\n\nConcise Summary:"
     
+    completion_args_error_sum: Dict[str, Any] = {
+        "model": summary_model_name,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.1,
+        "max_tokens": 50,
+        "api_base": api_base,
+        "stream": False
+    }
+    if summary_model_name.startswith("lm_studio/"):
+        completion_args_error_sum["api_key"] = "dummy"
+        
     try:
-        response = completion(
-            model=summary_model_name,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
-            max_tokens=50,
-            api_base=api_base,
-            stream=False
-        )
+        if DEBUG_LLM_INTERACTIONS: # New
+            console.print(f"[dim bold red]ERROR_SUM DEBUG: Request Params ({summary_model_name}):[/dim bold red]", stderr=True)
+            debug_error_sum_params_log = completion_args_error_sum.copy()
+            if "messages" in debug_error_sum_params_log: # Messages are short here
+                console.print(f"[dim bold red]ERROR_SUM DEBUG: Request Messages (detail):[/dim bold red]", stderr=True)
+                for i, msg in enumerate(debug_error_sum_params_log["messages"]):
+                    console.print(f"[dim red]Message {i}: {json.dumps(msg, indent=2, default=str)}[/dim red]", stderr=True)
+                del debug_error_sum_params_log["messages"]
+            console.print(RichJSON(json.dumps(debug_error_sum_params_log, indent=2, default=str)), stderr=True)
+
+        response = completion(**completion_args_error_sum) # Use the dict
         summary = response.choices[0].message.content.strip()
         return f"Summary: {summary}" if summary else error_message
-    except Exception:
+    except Exception as e_sum_err:
+        if DEBUG_LLM_INTERACTIONS:
+            console.print(f"[dim red]ERROR_SUM DEBUG: Exception: {e_sum_err}[/dim red]", stderr=True)
         return truncated_error_message
 
 def _perform_api_call_for_test(model_name_to_test: str, messages: list, api_base_for_call: Optional[str], temperature: float, max_tokens_val: int, timeout_val: int, completion_kwargs: dict, tools_list: Optional[list] = None) -> Any:
     """Helper to make a single API call and handle exceptions."""
-    call_args = {
+    call_args: Dict[str, Any] = {
         "model": model_name_to_test,
         "messages": messages,
         "api_base": api_base_for_call,
@@ -841,6 +1142,24 @@ def _perform_api_call_for_test(model_name_to_test: str, messages: list, api_base
 
     if tools_list:
         call_args["tools"] = tools_list
+
+    if DEBUG_LLM_INTERACTIONS: # New
+        console.print(f"[dim bold red]TEST_INF_CALL DEBUG: Request Params ({model_name_to_test}):[/dim bold red]", stderr=True)
+        # Create a serializable copy for debugging
+        debug_call_args_log = call_args.copy()
+        if "messages" in debug_call_args_log: # messages can be short here
+            console.print(f"[dim bold red]TEST_INF_CALL DEBUG: Request Messages (detail):[/dim bold red]", stderr=True)
+            for i, msg in enumerate(debug_call_args_log["messages"]):
+                console.print(f"[dim red]Message {i}: {json.dumps(msg, indent=2, default=str)}[/dim red]", stderr=True)
+            del debug_call_args_log["messages"] # Avoid re-printing in main JSON
+        
+        # Log tools separately if they exist
+        if "tools" in debug_call_args_log and debug_call_args_log["tools"]:
+            console.print(f"[dim bold red]TEST_INF_CALL DEBUG: Tools Spec (detail):[/dim bold red]", stderr=True)
+            console.print(RichJSON(json.dumps(debug_call_args_log["tools"], indent=2, default=str)), stderr=True)
+            del debug_call_args_log["tools"]
+        console.print(RichJSON(json.dumps(debug_call_args_log, indent=2, default=str)), stderr=True)
+
     return completion(**call_args)
 
 
@@ -903,7 +1222,6 @@ def _test_single_model_capabilities(model_label: str, model_name_to_test: str, a
         # if it doesn't match the expected domain for a known provider.
         # This could be problematic if a user is proxying a known provider through a custom domain.
         # For now, we'll keep it, but it's a point of attention.
-        # If api_base_for_call was already set (e.g. from MODEL_CONFIGURATIONS), we should be careful.
         # The current `api_base_for_call` is already resolved. This block might re-resolve it.
         # Let's assume `api_base_for_call` is the one to use, and this block is for providers
         # that LiteLLM handles internally without an explicit api_base.
@@ -1344,6 +1662,7 @@ def main():
   📌 [bold bright_blue]Main Commands:[/bold bright_blue]
   • [bright_cyan]/exit[/bright_cyan] or [bright_cyan]/quit[/bright_cyan] - End the session.
   • [bright_cyan]/help[/bright_cyan] - Display detailed help.
+  • [bright_cyan]/debug [on|off][/bright_cyan] - Toggle LLM interaction logging.
 
   👥 [bold white]Just ask naturally, like you are explaining to a Software Engineer.[/bold white]"""
 
@@ -1415,12 +1734,49 @@ def main():
         if try_handle_prompt_command(user_input): continue
         if try_handle_script_command(user_input): continue
         if try_handle_ask_command(user_input): continue
+        if try_handle_debug_command(user_input): continue # Add this line
         if try_handle_time_command(user_input): continue
         if try_handle_test_command(user_input): continue # Keep this line
 
         # Call with all necessary arguments
-        stream_llm_response(user_input, conversation_history, console, prompt_session)
+        # --- Routing Step ---
+        target_model_for_this_turn = get_config_value("model", LITELLM_MODEL_DEFAULT) # Default
+        
+        is_command = user_input.startswith("/")
+
+        if not is_command:
+            console.print("[dim]🕵️ Routing query...[/dim]") # Print for all non-commands
+
+            # Determine if routing should occur. Simple greetings bypass the LLM router.
+            greeting_pattern_for_routing_bypass = r"^\s*(hello|hi|hey|good\s+(morning|afternoon|evening)|how\s+are\s+you|how's\s+it\s+going|what's\s+up|sup)[\s!\.,\?]*\s*$"
+            is_simple_greeting_for_bypass = bool(re.match(greeting_pattern_for_routing_bypass, user_input.strip(), re.IGNORECASE))
+
+            if is_simple_greeting_for_bypass:
+                if DEBUG_LLM_INTERACTIONS:
+                    console.print("[dim]ROUTER DEBUG: Simple greeting detected, bypassing LLM router, using DEFAULT expert.[/dim]", stderr=True)
+                expert_keyword = "DEFAULT" # Directly assign
+                target_model_for_this_turn = map_expert_to_model(expert_keyword)
+                console.print(f"[dim]   -> Routed to: {expert_keyword} (Bypassed for greeting)[/dim]")
+                # No LLM routing needed for bypassed greeting
+            else: # Not a command, not a simple greeting -> route with LLM
+                expert_keyword = get_routing_expert_keyword(user_input, conversation_history, console)
+                target_model_for_this_turn = map_expert_to_model(expert_keyword)
+        # else: It's a command, no routing message, no LLM routing. Target model remains default.
+
+        # --- End Routing Step ---
+
+
+        stream_llm_response(
+            user_input, 
+            conversation_history, 
+            console, 
+            prompt_session, 
+            target_model_override=target_model_for_this_turn,
+            debug_llm_interactions_flag=DEBUG_LLM_INTERACTIONS # Pass the flag
+        )
+
     console.print("[bold blue]✨ Session finished. Thank you for using Software Engineer AI Assistant![/bold blue]")
+
     sys.exit(0)
 
 def execute_script_line(line: str):
@@ -1435,7 +1791,24 @@ def execute_script_line(line: str):
     if try_handle_prompt_command(line): return
     if try_handle_test_command(line): return
     # Call with all necessary arguments
-    stream_llm_response(line, conversation_history, console, prompt_session)
+    # --- Routing Step for script lines ---
+    target_model_for_script_line = get_config_value("model", LITELLM_MODEL_DEFAULT) # Default
+    is_script_command = line.startswith("/")
+    if line and not is_script_command: # Only route non-commands
+        console.print("[dim]🕵️ Routing query...[/dim]") # Print for script line routing
+        # For script lines, we assume they are not simple greetings needing bypass.
+        # If bypass logic were needed here, it would be similar to main loop.
+        expert_keyword_script = get_routing_expert_keyword(line, conversation_history, console)
+        target_model_for_script_line = map_expert_to_model(expert_keyword_script)
+    # --- End Routing Step ---
+    stream_llm_response(
+        line, 
+        conversation_history, 
+        console, prompt_session, 
+        target_model_override=target_model_for_script_line,
+        debug_llm_interactions_flag=DEBUG_LLM_INTERACTIONS # Pass the flag
+    )
+
 
 def try_handle_script_command(user_input: str, is_startup_script: bool = False) -> bool:
     command_prefix = "/script"
@@ -1493,7 +1866,52 @@ def try_handle_ask_command(user_input: str) -> bool:
         console.print("[yellow]Usage: /ask <text>[/yellow]\n[yellow]  Example: /ask What is the capital of France?[/yellow]")
         return True
     # Call with all necessary arguments
-    stream_llm_response(text_to_ask, conversation_history, console, prompt_session)
+    # --- Routing Step for /ask command ---
+    target_model_for_ask = get_config_value("model", LITELLM_MODEL_DEFAULT) # Default
+    if text_to_ask: # Only route if there's text to ask (already not a command)
+        console.print("[dim]🕵️ Routing query...[/dim]") # Print for /ask command routing
+        # For /ask, we assume the text is not a simple greeting needing bypass.
+        # If bypass logic were needed here, it would be similar to main loop.
+        expert_keyword_ask = get_routing_expert_keyword(text_to_ask, conversation_history, console)
+        target_model_for_ask = map_expert_to_model(expert_keyword_ask)
+
+    # --- End Routing Step ---
+    stream_llm_response(
+        text_to_ask, 
+        conversation_history, 
+        console, 
+        prompt_session, 
+        target_model_override=target_model_for_ask,
+        debug_llm_interactions_flag=DEBUG_LLM_INTERACTIONS # Pass the flag
+    )
+    return True
+
+def try_handle_debug_command(user_input: str) -> bool:
+    global DEBUG_LLM_INTERACTIONS
+    command_prefix = "/debug"
+    stripped_input = user_input.strip().lower()
+
+    if not stripped_input.startswith(command_prefix):
+        return False
+
+    parts = stripped_input.split()
+    if len(parts) == 1 and parts[0] == command_prefix: # Just "/debug"
+        console.print(f"[yellow]Usage: /debug <on|off>[/yellow]")
+        console.print(f"[dim]Current LLM interaction debug mode: {'ON' if DEBUG_LLM_INTERACTIONS else 'OFF'}[/dim]")
+        return True
+    
+    if len(parts) == 2:
+        action = parts[1]
+        if action == "on":
+            DEBUG_LLM_INTERACTIONS = True
+            console.print("[green]✓ LLM Interaction Debugging: ON[/green]")
+            return True
+        elif action == "off":
+            DEBUG_LLM_INTERACTIONS = False
+            console.print("[yellow]✓ LLM Interaction Debugging: OFF[/yellow]")
+            return True
+    
+    console.print(f"[yellow]Usage: /debug <on|off>[/yellow]")
     return True
 
 def try_handle_time_command(user_input: str) -> bool:

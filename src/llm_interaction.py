@@ -7,6 +7,7 @@ import httpx # Used by network_utils, but good to have if direct calls were ever
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from rich.json import JSON as RichJSON # Added import
 from prompt_toolkit import PromptSession
 
 from litellm import completion
@@ -18,7 +19,7 @@ from src.config_utils import (
     DEFAULT_REASONING_STYLE, DEFAULT_LITELLM_MAX_TOKENS, DEFAULT_REASONING_EFFORT,
     MAX_FILE_SIZE_BYTES
 )
-from src.file_utils import (
+from src.file_utils import ( # type: ignore
     normalize_path,
     read_local_file as util_read_local_file,
     create_file as util_create_file,
@@ -26,6 +27,7 @@ from src.file_utils import (
 )
 from src.network_utils import handle_local_mcp_stream, handle_remote_mcp_sse
 from src.file_context_utils import ensure_file_in_context
+from typing import Optional, Dict, Any # Added for type hinting
 
 
 def execute_function_call_dict(
@@ -141,8 +143,10 @@ def stream_llm_response(
     user_message: str,
     conversation_history: list,
     console: Console,
-    prompt_session: PromptSession
-):
+    prompt_session: PromptSession,
+    target_model_override: Optional[str] = None, # New parameter for routing
+    debug_llm_interactions_flag: bool = False # New parameter for debug logging
+) -> Dict[str, Any]:
     """
     Sends the user message and conversation history to the LLM and streams the response.
     Handles reasoning, final content, and tool calls.
@@ -153,9 +157,14 @@ def stream_llm_response(
         messages_for_api_call = copy.deepcopy(conversation_history)
 
         default_reply_effort_val = "medium"
-        default_temperature_val = 0.7
+        default_temperature_val = 0.6
 
-        model_name = get_config_value("model", DEFAULT_LITELLM_MODEL)
+        # Determine the model_name for this call
+        if target_model_override:
+            model_name = target_model_override
+            console.print(f"[dim]Using routed model: [bold magenta]{model_name}[/bold magenta][/dim]")
+        else:
+            model_name = get_config_value("model", DEFAULT_LITELLM_MODEL)
         
         # Determine the API base for this specific model_name
         # 1. Check model-specific configuration (MODEL_CONFIGURATIONS or ollama/lm_studio defaults via get_model_test_expectations)
@@ -166,7 +175,7 @@ def stream_llm_response(
         #    If LITELLM_API_BASE env var is not set and no runtime override, this will be None.
         globally_configured_api_base = get_config_value("api_base", None) # Pass None as default to see if it's truly set
 
-        api_base_url: Optional[str]
+        api_base_url: Optional[str] # Explicitly typed
         if api_base_from_model_config is not None:
             # Priority 1: Model-specific API base from its configuration.
             # This handles explicit api_base in MODEL_CONFIGURATIONS (can be a URL or None),
@@ -212,9 +221,9 @@ def stream_llm_response(
             "content": augmented_user_message_content
         })
 
-        console.print("\n[bold bright_blue]🔍 Seeking...[/bold bright_blue]")
+        console.print("[dim]🔍 Seeking...[/dim]")
 
-        completion_params = {
+        completion_params: Dict[str, Any] = {
             "model": model_name,
             "messages": messages_for_api_call,
             "tools": tools,
@@ -223,6 +232,26 @@ def stream_llm_response(
             "temperature": temperature,
             "stream": True
         }
+
+        if debug_llm_interactions_flag:
+            console.print(f"[dim bold red]LLM DEBUG: Request Params ({model_name}):[/dim bold red]", stderr=True)
+            debug_params_log = completion_params.copy()
+            if "messages" in debug_params_log:
+                console.print(f"[dim bold red]LLM DEBUG: Request Messages (detail):[/dim bold red]", stderr=True)
+                messages_to_log = []
+                # Log system, a note about history, and last user message
+                if len(debug_params_log["messages"]) > 2: # system, user, potentially history
+                    messages_to_log.append(debug_params_log["messages"][0]) # System prompt
+                    # If there are intermediate messages (history), show a placeholder
+                    if len(debug_params_log["messages"]) > 2: # system, user, and at least one history item
+                         messages_to_log.append({"role": "system", "content": f"... ({len(debug_params_log['messages']) - 2} intermediate messages hidden) ..."})
+                    messages_to_log.append(debug_params_log["messages"][-1]) # Last user message (with effort instructions)
+                else: # Only system and user message
+                    messages_to_log = debug_params_log["messages"]
+                for i, msg_item in enumerate(messages_to_log):
+                    console.print(f"[dim red]Message {i}: {json.dumps(msg_item, indent=2, default=str)}[/dim red]", stderr=True)
+                del debug_params_log["messages"] # Avoid re-printing in main JSON
+            console.print(RichJSON(json.dumps(debug_params_log, indent=2, default=str)), stderr=True)
 
         # Add dummy API key for LM Studio models.
         # api_base_url is the resolved API base (model-specific or global)
@@ -236,6 +265,19 @@ def stream_llm_response(
         stream = completion(**completion_params)
 
         for chunk in stream:
+            if debug_llm_interactions_flag:
+                console.print(f"[dim bold red]LLM DEBUG: Raw Chunk ({model_name}):[/dim bold red]", stderr=True)
+                try:
+                    chunk_dict = chunk.dict() if hasattr(chunk, 'dict') else vars(chunk)
+                    # Clean up common noisy fields for brevity in logs
+                    if 'id' in chunk_dict and chunk_dict['id'] == chunk_dict.get('model'):
+                        del chunk_dict['id']
+                    if 'system_fingerprint' in chunk_dict: # Often None or not useful for this log
+                        del chunk_dict['system_fingerprint']
+                    console.print(RichJSON(json.dumps(chunk_dict, indent=2, default=str)), stderr=True)
+                except Exception as e_debug_chunk:
+                    console.print(f"[dim red]LLM DEBUG: Error serializing chunk for debug: {e_debug_chunk}[/dim red]", stderr=True)
+                    console.print(f"[dim red]Raw chunk object: {chunk}[/dim red]", stderr=True)
             delta = chunk.choices[0].delta
             if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
                 reasoning_chunk_content = delta.reasoning_content
@@ -255,7 +297,7 @@ def stream_llm_response(
                     console.print() # Newline after compact reasoning dots
                     reasoning_started_printed = False
                 if not final_content: # First part of the actual reply
-                    console.print("\n\n[bold bright_blue]🤖 Assistant>[/bold bright_blue] ", end="")
+                    console.print("\n[bold bright_blue]🤖 Assistant>[/bold bright_blue] ", end="")
                 final_content += delta.content
                 console.print(delta.content, end="")
             elif delta.tool_calls:
@@ -278,6 +320,40 @@ def stream_llm_response(
             console.print() # Ensure newline if only compact reasoning dots were printed
 
         console.print() # Ensure the next prompt is on a new line
+
+        # --- Add JSON detection and pretty-printing for non-tool responses ---
+        if final_content and not tool_calls: # If there was text content and no tool calls were detected by LiteLLM
+            try:
+                # A light heuristic check to avoid attempting to parse very long non-JSON text blocks
+                # and to ensure it's not just a simple string that happens to be parsable (e.g. "null", "true")
+                # when we are expecting a complex JSON object or array.
+                stripped_content = final_content.strip()
+                if (stripped_content.startswith("{") and stripped_content.endswith("}")) or \
+                   (stripped_content.startswith("[") and stripped_content.endswith("]")):
+                    
+                    # Attempt to parse the entire accumulated final_content to confirm it's valid JSON
+                    json.loads(final_content) # We don't need the parsed object here, just to validate
+                    
+                    # If parsing is successful, it means the model returned JSON as its main content.
+                    # The raw JSON has already been streamed to the console token by token.
+                    # Now, print a more readable, formatted version in a panel.
+                    console.print(Panel(
+                        RichJSON(final_content), # Use the original final_content string for RichJSON
+                        title="[dim]Assistant Response (Interpreted as JSON)[/dim]",
+                        border_style="yellow",
+                        expand=False, # Keep it compact
+                        title_align="left"
+                    ))
+                    console.print() # Add a small newline after the panel for better separation
+            except json.JSONDecodeError:
+                # Not valid JSON, or not the kind of structured JSON we're looking to highlight.
+                # The content was already streamed as text, so no further action needed.
+                pass
+            except Exception as e_json_check:
+                # Catch any other unexpected errors during the JSON check/formatting
+                # and print a discreet notification.
+                console.print(f"[yellow dim]Note: A minor issue occurred while trying to format the assistant's response as JSON: {e_json_check}[/yellow dim]")
+        # --- End JSON detection ---
 
         conversation_history.append({"role": "user", "content": user_message}) # Add original user message
         assistant_message = {"role": "assistant", "content": final_content if final_content else None}
@@ -367,7 +443,12 @@ def stream_llm_response(
                 # Get follow-up response from LLM
                 console.print("\n[bold bright_blue]🔄 Processing results...[/bold bright_blue]")
                 # Recursive call effectively, but LiteLLM handles this by sending history
-                return stream_llm_response("Tool execution finished. Please respond to the user based on the results.", conversation_history, console, prompt_session)
+                # The recursive call should also use the same target_model_override if one was set for the initial turn.
+                return stream_llm_response(
+                    "Tool execution finished. Please respond to the user based on the results.", 
+                    conversation_history, console, prompt_session, 
+                    target_model_override=target_model_override,
+                    debug_llm_interactions_flag=debug_llm_interactions_flag) # Pass flag
 
         else: # No tool calls, just a regular response
             conversation_history.append(assistant_message)
@@ -379,4 +460,7 @@ def stream_llm_response(
         console.print(f"\n[bold red]❌ {error_msg}[/bold red]")
         # Add error to history for context, but as a system message to avoid confusing the LLM
         conversation_history.append({"role": "system", "content": f"Error during LLM call: {error_msg}"})
+        if debug_llm_interactions_flag:
+            console.print(f"[dim red]LLM DEBUG: Exception: {e}[/dim red]", stderr=True)
         return {"error": error_msg}
+
