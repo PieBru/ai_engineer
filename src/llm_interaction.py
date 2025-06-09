@@ -163,7 +163,7 @@ def stream_llm_response(
         # Determine the model_name for this call
         if target_model_override:
             model_name = target_model_override
-            app_state.console.print(f"[dim]Using routed model: [bold magenta]{model_name}[/bold magenta][/dim]")
+            app_state.console.print(f"[dim]🧠 Using routed model: [bold magenta]{model_name}[/bold magenta][/dim]")
         else:
             model_name = get_config_value("model", DEFAULT_LITELLM_MODEL, app_state.RUNTIME_OVERRIDES, app_state.console)
         
@@ -222,7 +222,7 @@ def stream_llm_response(
             "content": augmented_user_message_content
         })
 
-        app_state.console.print("[dim]🔍 Seeking...[/dim]")
+        # app_state.console.print("[dim]🔍 Asking...[/dim]")
 
         completion_params: Dict[str, Any] = {
             "model": model_name,

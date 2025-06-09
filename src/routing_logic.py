@@ -154,7 +154,7 @@ def get_routing_expert_keyword(user_query: str, app_state: 'AppState') -> str:
                         final_keyword_candidate = "DEFAULT"
 
         keyword = final_keyword_candidate.strip().upper()
-        app_state.console.print(f"[dim]   -> Routed to: {keyword}[/dim]")
+        app_state.console.print(f"[dim]  ➔ Routed to: {keyword}[/dim]")
 
         if keyword not in VALID_ROUTING_KEYWORDS:
             app_state.console.print(f"[yellow]Warning: Routing LLM returned unknown keyword '{keyword}'. Defaulting to DEFAULT.[/yellow]")

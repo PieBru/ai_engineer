@@ -1,6 +1,6 @@
  🎯 **Commands:**
 
-*   **`/help {command}`** - Display detailed help information about a `/command` (default `/help`).
+*   **`/help {command}`** - Display detailed help information about a `/command`.
 
 *   **`/add`** `[path/to/file_or_folder]` - Add the content of a specific file or all files in a folder to the conversation context.
     Call `/add` without arguments for detailed usage and examples.
@@ -12,6 +12,8 @@
 
 *   **`/context`** `[subcommand] [name/path]` - Manage conversation context (save, load, list, summarize).
     Call `/context` without arguments for usage., `/help context` for more details.
+
+*   **`/debug [on|off]`**  - Toggle internal debugging output.
 
 *   **`/exit`** or **`/quit`** - End the current session.
 

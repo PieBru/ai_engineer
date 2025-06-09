@@ -10,6 +10,12 @@ code analysis, and development assistance via natural conversation and function 
 Original source: https://github.com/PieBru/ai_engineer
 """
 
+# Perform startup checks (e.g., venv) VERY FIRST.
+# This import should be safe as startup_checks is designed to have minimal dependencies
+# or handle missing ones (like Rich) for the check itself.
+from src import startup_checks
+startup_checks.perform_venv_check() # This will exit if not in a venv
+
 import os
 import sys
 import argparse
@@ -45,7 +51,6 @@ from src.config_utils import (
 from src import command_handlers
 from src import routing_logic
 from src import inference_tester
-from src import startup_checks # For venv check
 from src.llm_interaction import stream_llm_response
 from src.prompts import RichMarkdown # If RichMarkdown is used directly for help panel
 
@@ -96,16 +101,16 @@ def display_welcome_panel(app_state: AppState):
     instructions = f"""  📁 [bold bright_blue]Current Directory: [/bold bright_blue][bold green]{current_working_directory}[/bold green]
 
   🧠 [bold bright_blue]Default Model: [/bold bright_blue][bold magenta]{current_model_name_for_display}[/bold magenta] ([dim]{context_window_display_str}[/dim])
-  Routing: [dim]{get_config_value("model_routing", LITELLM_MODEL_ROUTING, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim] | Tools: [dim]{get_config_value("model_tools", LITELLM_MODEL_TOOLS, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim]
-  Coding: [dim]{get_config_value("model_coding", LITELLM_MODEL_CODING, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim] | Knowledge: [dim]{get_config_value("model_knowledge", LITELLM_MODEL_KNOWLEDGE, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim]
-  Summarize: [dim]{get_config_value("model_summarize", LITELLM_MODEL_SUMMARIZE, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim] | Planner: [dim]{get_config_value("model_planner", LITELLM_MODEL_PLANNER, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim]
-  Task Mgr: [dim]{get_config_value("model_task_manager", LITELLM_MODEL_TASK_MANAGER, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim] | Rule Enh: [dim]{get_config_value("model_rule_enhancer", LITELLM_MODEL_RULE_ENHANCER, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim]
-  Prompt Enh: [dim]{get_config_value("model_prompt_enhancer", LITELLM_MODEL_PROMPT_ENHANCER, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim] | Workflow Mgr: [dim]{get_config_value("model_workflow_manager", LITELLM_MODEL_WORKFLOW_MANAGER, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim]
+     Routing: [dim]{get_config_value("model_routing", LITELLM_MODEL_ROUTING, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim] | Tools: [dim]{get_config_value("model_tools", LITELLM_MODEL_TOOLS, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim]
+     Coding: [dim]{get_config_value("model_coding", LITELLM_MODEL_CODING, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim] | Knowledge: [dim]{get_config_value("model_knowledge", LITELLM_MODEL_KNOWLEDGE, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim]
+     Summarize: [dim]{get_config_value("model_summarize", LITELLM_MODEL_SUMMARIZE, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim] | Planner: [dim]{get_config_value("model_planner", LITELLM_MODEL_PLANNER, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim]
+     Task Mgr: [dim]{get_config_value("model_task_manager", LITELLM_MODEL_TASK_MANAGER, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim] | Rule Enh: [dim]{get_config_value("model_rule_enhancer", LITELLM_MODEL_RULE_ENHANCER, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim]
+     Prompt Enh: [dim]{get_config_value("model_prompt_enhancer", LITELLM_MODEL_PROMPT_ENHANCER, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim] | Workflow Mgr: [dim]{get_config_value("model_workflow_manager", LITELLM_MODEL_WORKFLOW_MANAGER, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim]
 
-  📌 [bold bright_blue]Main Commands:[/bold bright_blue]
-  • [bright_cyan]/exit[/bright_cyan] or [bright_cyan]/quit[/bright_cyan] - End the session.
-  • [bright_cyan]/help[/bright_cyan] - Display detailed help.
-  • [bright_cyan]/debug [on|off][/bright_cyan] - Toggle LLM interaction logging.
+  ❓ [bold bright_blue]/help[/bold bright_blue] - Documentation runtime entry point.
+
+  🌐 [bold bright_blue]Online project resources:[/bold bright_blue]
+     • Official Github Repository: https://github.com/PieBru/ai_engineer
 
   👥 [bold white]Just ask naturally, like you are explaining to a Software Engineer.[/bold white]"""
 
@@ -118,8 +123,11 @@ def display_welcome_panel(app_state: AppState):
     ))
     app_state.console.print()
 
-def get_prompt_prefix(app_state: AppState) -> str:
-    """Generates the prefix for the prompt, including context usage and timestamp."""
+def get_context_usage_prompt_string(app_state: AppState) -> str:
+    """
+    Generates the context usage string for the prompt (e.g., "[Ctx: 50%] ").
+    Returns an empty string if context info cannot be determined.
+    """
     prefix = ""
     if app_state.conversation_history:
         try:
@@ -137,8 +145,6 @@ def get_prompt_prefix(app_state: AppState) -> str:
         except Exception:
             # If token counting fails, don't break the prompt
             pass 
-    if app_state.SHOW_TIMESTAMP_IN_PROMPT:
-        prefix += f"{time.strftime('%H:%M:%S')} "
     return prefix
 
 def execute_script_line(line: str, app_state: AppState):
@@ -164,7 +170,7 @@ def execute_script_line(line: str, app_state: AppState):
     is_script_command = line.startswith("/") # Re-check, though most /commands are handled above
     
     if line and not is_script_command:
-        app_state.console.print("[dim]🕵️ Routing query...[/dim]")
+        app_state.console.print("[dim]↪ Routing query...[/dim]")
         expert_keyword_script = routing_logic.get_routing_expert_keyword(line, app_state)
         target_model_for_script_line = routing_logic.map_expert_to_model(expert_keyword_script, app_state)
     
@@ -182,9 +188,6 @@ def clear_screen():
 
 def main():
     app_state = AppState()
-
-    # Perform startup checks (e.g., venv)
-    startup_checks.perform_venv_check() # Assuming perform_venv_check is now in startup_checks
 
     # Load .env, config.toml
     load_app_configuration(app_state.console) # This might set some initial RUNTIME_OVERRIDES if config.toml is used
@@ -223,8 +226,12 @@ def main():
 
     while True:
         try:
-            prompt_prefix = get_prompt_prefix(app_state)
-            user_input = app_state.prompt_session.prompt(f"{prompt_prefix}🔵 You> ").strip()
+            context_usage_str = get_context_usage_prompt_string(app_state)
+            timestamp_str = ""
+            if app_state.SHOW_TIMESTAMP_IN_PROMPT:
+                timestamp_str = f"{time.strftime('%H:%M:%S')} "
+            
+            user_input = app_state.prompt_session.prompt(f"{timestamp_str}🔵 {context_usage_str}You> ").strip()
         except (EOFError, KeyboardInterrupt):
             app_state.console.print("\n[bold yellow]👋 Exiting gracefully...[/bold yellow]")
             sys.exit(0)
@@ -264,7 +271,7 @@ def main():
         # --- Routing Step for non-commands ---
         target_model_for_this_turn = get_config_value("model", LITELLM_MODEL_DEFAULT, app_state.RUNTIME_OVERRIDES, app_state.console)
         
-        app_state.console.print("[dim]🕵️ Routing query...[/dim]")
+        app_state.console.print("[dim]↪ Routing query...[/dim]")
 
         greeting_pattern_for_routing_bypass = r"^\s*(hello|hi|hey|good\s+(morning|afternoon|evening)|how\s+are\s+you|how's\s+it\s+going|what's\s+up|sup)[\s!\.,\?]*\s*$"
         is_simple_greeting_for_bypass = bool(re.match(greeting_pattern_for_routing_bypass, user_input.strip(), re.IGNORECASE))
@@ -274,7 +281,7 @@ def main():
                 Console(stderr=True).print("[dim]ROUTER DEBUG: Simple greeting detected, bypassing LLM router, using DEFAULT expert.[/dim]")
             expert_keyword = "DEFAULT"
             target_model_for_this_turn = routing_logic.map_expert_to_model(expert_keyword, app_state) 
-            app_state.console.print(f"[dim]   -> Routed to: {expert_keyword} (Bypassed for greeting)[/dim]")
+            app_state.console.print(f"[dim]  ➔ Routed to: {expert_keyword} (Bypassed for greeting)[/dim]")
         else:
             expert_keyword = routing_logic.get_routing_expert_keyword(user_input, app_state)
             target_model_for_this_turn = routing_logic.map_expert_to_model(expert_keyword, app_state)
