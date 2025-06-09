@@ -28,6 +28,10 @@ from src.file_utils import ( # type: ignore
 from src.network_utils import handle_local_mcp_stream, handle_remote_mcp_sse
 from src.file_context_utils import ensure_file_in_context
 from typing import Optional, Dict, Any # Added for type hinting
+# Assuming AppState will be defined in a way that can be imported for type hinting
+# from .app_state import AppState # Or similar, depending on final structure
+if False: # For type hinting
+    from src.app_state import AppState
 
 
 def execute_function_call_dict(
@@ -141,20 +145,17 @@ def trim_conversation_history(conversation_history: list):
 
 def stream_llm_response(
     user_message: str,
-    conversation_history: list,
-    console: Console,
-    prompt_session: PromptSession,
-    target_model_override: Optional[str] = None, # New parameter for routing
-    debug_llm_interactions_flag: bool = False # New parameter for debug logging
+    app_state: 'AppState', # Use AppState
+    target_model_override: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Sends the user message and conversation history to the LLM and streams the response.
     Handles reasoning, final content, and tool calls.
     Returns a dictionary indicating success or error.
     """
-    trim_conversation_history(conversation_history)
+    trim_conversation_history(app_state.conversation_history)
     try:
-        messages_for_api_call = copy.deepcopy(conversation_history)
+        messages_for_api_call = copy.deepcopy(app_state.conversation_history)
 
         default_reply_effort_val = "medium"
         default_temperature_val = 0.6
@@ -162,9 +163,9 @@ def stream_llm_response(
         # Determine the model_name for this call
         if target_model_override:
             model_name = target_model_override
-            console.print(f"[dim]Using routed model: [bold magenta]{model_name}[/bold magenta][/dim]")
+            app_state.console.print(f"[dim]Using routed model: [bold magenta]{model_name}[/bold magenta][/dim]")
         else:
-            model_name = get_config_value("model", DEFAULT_LITELLM_MODEL)
+            model_name = get_config_value("model", DEFAULT_LITELLM_MODEL, app_state.RUNTIME_OVERRIDES, app_state.console)
         
         # Determine the API base for this specific model_name
         # 1. Check model-specific configuration (MODEL_CONFIGURATIONS or ollama/lm_studio defaults via get_model_test_expectations)
@@ -173,7 +174,7 @@ def stream_llm_response(
 
         # 2. Check for a globally configured API base (e.g., LITELLM_API_BASE env var or /set api_base)
         #    If LITELLM_API_BASE env var is not set and no runtime override, this will be None.
-        globally_configured_api_base = get_config_value("api_base", None) # Pass None as default to see if it's truly set
+        globally_configured_api_base = get_config_value("api_base", None, app_state.RUNTIME_OVERRIDES, app_state.console) # Pass None as default to see if it's truly set
 
         api_base_url: Optional[str] # Explicitly typed
         if api_base_from_model_config is not None:
@@ -190,23 +191,23 @@ def stream_llm_response(
             # This implies a direct provider call using API keys, so api_base should be None.
             api_base_url = None
 
-        reasoning_style = str(get_config_value("reasoning_style", DEFAULT_REASONING_STYLE)).lower()
-        max_tokens_raw = get_config_value("max_tokens", DEFAULT_LITELLM_MAX_TOKENS)
+        reasoning_style = str(get_config_value("reasoning_style", DEFAULT_REASONING_STYLE, app_state.RUNTIME_OVERRIDES, app_state.console)).lower()
+        max_tokens_raw = get_config_value("max_tokens", DEFAULT_LITELLM_MAX_TOKENS, app_state.RUNTIME_OVERRIDES, app_state.console)
         try:
             max_tokens = int(max_tokens_raw)
             if max_tokens <= 0: max_tokens = DEFAULT_LITELLM_MAX_TOKENS # Fallback
         except (ValueError, TypeError):
             max_tokens = DEFAULT_LITELLM_MAX_TOKENS
 
-        temperature_raw = get_config_value("temperature", default_temperature_val)
+        temperature_raw = get_config_value("temperature", default_temperature_val, app_state.RUNTIME_OVERRIDES, app_state.console)
         try:
             temperature = float(temperature_raw)
         except (ValueError, TypeError):
-            console.print(f"[yellow]Warning: Invalid temperature value '{temperature_raw}'. Using default {default_temperature_val}.[/yellow]")
+            app_state.console.print(f"[yellow]Warning: Invalid temperature value '{temperature_raw}'. Using default {default_temperature_val}.[/yellow]")
             temperature = default_temperature_val
 
-        reasoning_effort_setting = str(get_config_value("reasoning_effort", DEFAULT_REASONING_EFFORT)).lower()
-        reply_effort_setting = str(get_config_value("reply_effort", default_reply_effort_val)).lower()
+        reasoning_effort_setting = str(get_config_value("reasoning_effort", DEFAULT_REASONING_EFFORT, app_state.RUNTIME_OVERRIDES, app_state.console)).lower()
+        reply_effort_setting = str(get_config_value("reply_effort", default_reply_effort_val, app_state.RUNTIME_OVERRIDES, app_state.console)).lower()
 
         effort_instructions = (
             f"\n\n[System Instructions For This Turn Only]:\n"
@@ -221,7 +222,7 @@ def stream_llm_response(
             "content": augmented_user_message_content
         })
 
-        console.print("[dim]🔍 Seeking...[/dim]")
+        app_state.console.print("[dim]🔍 Seeking...[/dim]")
 
         completion_params: Dict[str, Any] = {
             "model": model_name,
@@ -233,7 +234,7 @@ def stream_llm_response(
             "stream": True
         }
 
-        if debug_llm_interactions_flag:
+        if app_state.DEBUG_LLM_INTERACTIONS:
             Console(stderr=True).print(f"[dim bold red]LLM DEBUG: Request Params ({model_name}):[/dim bold red]")
             debug_params_log = completion_params.copy()
             if "messages" in debug_params_log:
@@ -265,7 +266,7 @@ def stream_llm_response(
         stream = completion(**completion_params)
 
         for chunk in stream:
-            if debug_llm_interactions_flag:
+            if app_state.DEBUG_LLM_INTERACTIONS:
                 Console(stderr=True).print(f"[dim bold red]LLM DEBUG: Raw Chunk ({model_name}):[/dim bold red]")
                 try:
                     chunk_dict = chunk.dict() if hasattr(chunk, 'dict') else vars(chunk)
@@ -284,25 +285,25 @@ def stream_llm_response(
                 reasoning_content_accumulated += reasoning_chunk_content
                 if reasoning_style == "full":
                     if not reasoning_started_printed:
-                        console.print("\n[bold blue]💭 Reasoning:[/bold blue]")
+                        app_state.console.print("\n[bold blue]💭 Reasoning:[/bold blue]")
                         reasoning_started_printed = True
-                    console.print(reasoning_chunk_content, end="")
+                    app_state.console.print(reasoning_chunk_content, end="")
                 elif reasoning_style == "compact":
                     if not reasoning_started_printed:
-                        console.print("\n[bold blue]💭 Reasoning...[/bold blue]", end="")
+                        app_state.console.print("\n[bold blue]💭 Reasoning...[/bold blue]", end="")
                         reasoning_started_printed = True
-                    console.print(".", end="")
+                    app_state.console.print(".", end="")
             elif delta.content:
                 if reasoning_started_printed and reasoning_style != "full":
-                    console.print() # Newline after compact reasoning dots
+                    app_state.console.print() # Newline after compact reasoning dots
                     reasoning_started_printed = False
                 if not final_content: # First part of the actual reply
-                    console.print("\n[bold bright_blue]🤖 Assistant>[/bold bright_blue] ", end="")
+                    app_state.console.print("\n[bold bright_blue]🤖 Assistant>[/bold bright_blue] ", end="")
                 final_content += delta.content
-                console.print(delta.content, end="")
+                app_state.console.print(delta.content, end="")
             elif delta.tool_calls:
                 if reasoning_started_printed and reasoning_style != "full":
-                    console.print()
+                    app_state.console.print()
                     reasoning_started_printed = False
                 for tool_call_delta in delta.tool_calls:
                     if tool_call_delta.index is not None: # Ensure index exists
@@ -317,9 +318,9 @@ def stream_llm_response(
                                 tool_calls[tool_call_delta.index]["function"]["arguments"] += tool_call_delta.function.arguments
 
         if reasoning_started_printed and reasoning_style == "compact" and not final_content and not tool_calls:
-            console.print() # Ensure newline if only compact reasoning dots were printed
+            app_state.console.print() # Ensure newline if only compact reasoning dots were printed
 
-        console.print() # Ensure the next prompt is on a new line
+        app_state.console.print() # Ensure the next prompt is on a new line
 
         # --- Add JSON detection and pretty-printing for non-tool responses ---
         if final_content and not tool_calls: # If there was text content and no tool calls were detected by LiteLLM
@@ -337,14 +338,14 @@ def stream_llm_response(
                     # If parsing is successful, it means the model returned JSON as its main content.
                     # The raw JSON has already been streamed to the console token by token.
                     # Now, print a more readable, formatted version in a panel.
-                    console.print(Panel(
+                    app_state.console.print(Panel(
                         RichJSON(final_content), # Use the original final_content string for RichJSON
                         title="[dim]Assistant Response (Interpreted as JSON)[/dim]",
                         border_style="yellow",
                         expand=False, # Keep it compact
                         title_align="left"
                     ))
-                    console.print() # Add a small newline after the panel for better separation
+                    app_state.console.print() # Add a small newline after the panel for better separation
             except json.JSONDecodeError:
                 # Not valid JSON, or not the kind of structured JSON we're looking to highlight.
                 # The content was already streamed as text, so no further action needed.
@@ -352,10 +353,10 @@ def stream_llm_response(
             except Exception as e_json_check:
                 # Catch any other unexpected errors during the JSON check/formatting
                 # and print a discreet notification.
-                console.print(f"[yellow dim]Note: A minor issue occurred while trying to format the assistant's response as JSON: {e_json_check}[/yellow dim]")
+                app_state.console.print(f"[yellow dim]Note: A minor issue occurred while trying to format the assistant's response as JSON: {e_json_check}[/yellow dim]")
         # --- End JSON detection ---
 
-        conversation_history.append({"role": "user", "content": user_message}) # Add original user message
+        app_state.conversation_history.append({"role": "user", "content": user_message}) # Add original user message
         assistant_message = {"role": "assistant", "content": final_content if final_content else None}
         if reasoning_content_accumulated:
             assistant_message["reasoning_content_full"] = reasoning_content_accumulated
@@ -374,21 +375,21 @@ def stream_llm_response(
 
             if formatted_tool_calls:
                 assistant_message["tool_calls"] = formatted_tool_calls
-                conversation_history.append(assistant_message)
+                app_state.conversation_history.append(assistant_message)
 
-                console.print(f"\n[bold bright_cyan]⚡ Executing {len(formatted_tool_calls)} function call(s)...[/bold bright_cyan]")
+                app_state.console.print(f"\n[bold bright_cyan]⚡ Executing {len(formatted_tool_calls)} function call(s)...[/bold bright_cyan]")
                 executed_tool_call_ids_and_results = []
 
                 for tool_call in formatted_tool_calls:
                     tool_name = tool_call['function']['name']
-                    console.print(f"[bright_blue]→ {tool_name}[/bright_blue]")
+                    app_state.console.print(f"[bright_blue]→ {tool_name}[/bright_blue]")
                     user_confirmed_or_not_risky = True
                     if tool_name in RISKY_TOOLS:
-                        console.print(f"[bold yellow]⚠️ This is a risky operation: {tool_name}[/bold yellow]")
+                        app_state.console.print(f"[bold yellow]⚠️ This is a risky operation: {tool_name}[/bold yellow]")
                         try:
                             args = json.loads(tool_call['function']['arguments'])
                         except json.JSONDecodeError:
-                            console.print("[red]Error: Could not parse tool arguments.[/red]")
+                            app_state.console.print("[red]Error: Could not parse tool arguments.[/red]")
                             executed_tool_call_ids_and_results.append({
                                 "role": "tool", "tool_call_id": tool_call["id"],
                                 "content": f"Error: Could not parse arguments for {tool_name}"
@@ -397,38 +398,38 @@ def stream_llm_response(
 
                         # Preview for risky tools
                         if tool_name == "create_file":
-                            console.print(f"   Action: Create/overwrite file '{args.get('file_path')}'")
+                            app_state.console.print(f"   Action: Create/overwrite file '{args.get('file_path')}'")
                             content_summary = args.get('content', '')[:100] + "..." if len(args.get('content', '')) > 100 else args.get('content', '')
-                            console.print(Panel(content_summary, title="Content Preview", border_style="yellow", expand=False))
+                            app_state.console.print(Panel(content_summary, title="Content Preview", border_style="yellow", expand=False))
                         elif tool_name == "create_multiple_files":
                             files_to_create_preview = args.get('files', [])
                             if files_to_create_preview:
                                 file_paths = [f.get('path', 'unknown') for f in files_to_create_preview]
-                                console.print(f"   Action: Create/overwrite {len(file_paths)} files: {', '.join(file_paths[:5])}{'...' if len(file_paths) > 5 else ''}")
+                                app_state.console.print(f"   Action: Create/overwrite {len(file_paths)} files: {', '.join(file_paths[:5])}{'...' if len(file_paths) > 5 else ''}")
                             else:
-                                console.print("   Action: Create multiple files (none specified).")
+                                app_state.console.print("   Action: Create multiple files (none specified).")
                         elif tool_name == "edit_file":
-                            console.print(f"   Action: Edit file '{args.get('file_path')}'")
+                            app_state.console.print(f"   Action: Edit file '{args.get('file_path')}'")
                             original_snippet_summary = args.get('original_snippet', '')[:70] + "..." if len(args.get('original_snippet', '')) > 70 else args.get('original_snippet', '')
                             new_snippet_summary = args.get('new_snippet', '')[:70] + "..." if len(args.get('new_snippet', '')) > 70 else args.get('new_snippet', '')
                             diff_table = Table(show_header=False, box=None, padding=0)
                             diff_table.add_row("[red]- Original:[/red]", original_snippet_summary)
                             diff_table.add_row("[green]+ New:     [/green]", new_snippet_summary)
-                            console.print(diff_table)
+                            app_state.console.print(diff_table)
                         elif tool_name == "connect_remote_mcp_sse":
-                             console.print(f"   Action: Connect to remote SSE endpoint '{args.get('endpoint_url')}'")
+                             app_state.console.print(f"   Action: Connect to remote SSE endpoint '{args.get('endpoint_url')}'")
 
-                        confirmation = prompt_session.prompt("Proceed with this operation? [Y/n]: ", default="y").strip().lower()
+                        confirmation = app_state.prompt_session.prompt("Proceed with this operation? [Y/n]: ", default="y").strip().lower()
                         if confirmation not in ["y", "yes", ""]:
                             user_confirmed_or_not_risky = False
-                            console.print("[yellow]ℹ️ Operation cancelled by user.[/yellow]")
+                            app_state.console.print("[yellow]ℹ️ Operation cancelled by user.[/yellow]")
                             result = "User cancelled execution of this tool call."
 
                     if user_confirmed_or_not_risky:
                         try:
-                            result = execute_function_call_dict(tool_call, console, conversation_history)
+                            result = execute_function_call_dict(tool_call, app_state.console, app_state.conversation_history)
                         except Exception as e_exec:
-                            console.print(f"[red]Unexpected error during tool execution: {str(e_exec)}[/red]")
+                            app_state.console.print(f"[red]Unexpected error during tool execution: {str(e_exec)}[/red]")
                             result = f"Error: Unexpected error during tool execution: {str(e_exec)}"
 
                     executed_tool_call_ids_and_results.append({
@@ -438,28 +439,27 @@ def stream_llm_response(
                     })
 
                 for tool_res in executed_tool_call_ids_and_results:
-                    conversation_history.append(tool_res) # type: ignore
+                    app_state.conversation_history.append(tool_res) # type: ignore
 
                 # Get follow-up response from LLM
-                console.print("\n[bold bright_blue]🔄 Processing results...[/bold bright_blue]")
+                app_state.console.print("\n[bold bright_blue]🔄 Processing results...[/bold bright_blue]")
                 # Recursive call effectively, but LiteLLM handles this by sending history
                 # The recursive call should also use the same target_model_override if one was set for the initial turn.
                 return stream_llm_response(
                     "Tool execution finished. Please respond to the user based on the results.", 
-                    conversation_history, console, prompt_session, 
-                    target_model_override=target_model_override,
-                    debug_llm_interactions_flag=debug_llm_interactions_flag) # Pass flag
+                    app_state, # Pass the whole app_state
+                    target_model_override=target_model_override)
 
         else: # No tool calls, just a regular response
-            conversation_history.append(assistant_message)
+            app_state.conversation_history.append(assistant_message)
 
         return {"success": True}
 
     except Exception as e:
         error_msg = f"LLM API error: {str(e)}"
-        console.print(f"\n[bold red]❌ {error_msg}[/bold red]")
+        app_state.console.print(f"\n[bold red]❌ {error_msg}[/bold red]")
         # Add error to history for context, but as a system message to avoid confusing the LLM
-        conversation_history.append({"role": "system", "content": f"Error during LLM call: {error_msg}"})
-        if debug_llm_interactions_flag:
+        app_state.conversation_history.append({"role": "system", "content": f"Error during LLM call: {error_msg}"})
+        if app_state.DEBUG_LLM_INTERACTIONS:
             Console(stderr=True).print(f"[dim red]LLM DEBUG: Exception: {e}[/dim red]")
         return {"error": error_msg}

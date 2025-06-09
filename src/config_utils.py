@@ -7,12 +7,13 @@ from dotenv import load_dotenv
 # Default LiteLLM configuration values - LITELLM_MODEL serves as LITELLM_MODEL_DEFAULT
 DEFAULT_OLLAMA_API_BASE = "http://localhost:11434"
 DEFAULT_LM_STUDIO_API_BASE = "http://localhost:1234/v1"
+DEFAULT_LITELLM_MAX_TOKENS_ROUTING = 150 # New default for routing max_tokens
 DEFAULT_LITELLM_MAX_TOKENS = 4096  # Example, adjust as needed
 DEFAULT_LITELLM_MAX_TOKENS = 32768  # For models which context window size is unknown
 
 # Defaults for specialized models. Users should override these via .env for optimal use.
 DEFAULT_LITELLM_MODEL =                  "ollama_chat/mistral-small"
-DEFAULT_LITELLM_MODEL_ROUTING =          "ollama_chat/qwen3:4b" # Often a smaller, faster model
+DEFAULT_LITELLM_MODEL_ROUTING =          "ollama_chat/gemma3:1b-it-qat" # Often a smaller, faster model
 DEFAULT_LITELLM_MODEL_TOOLS =            DEFAULT_LITELLM_MODEL # A good tool calls handler
 DEFAULT_LITELLM_MODEL_CODING =           "ollama_chat/devstral" # Specialized coding model, also "deepseek/deepseek-reasoner" (SOTA 2025, slower, more expensive)
 DEFAULT_LITELLM_MODEL_KNOWLEDGE =        DEFAULT_LITELLM_MODEL # For general knowledge
@@ -26,9 +27,6 @@ DEFAULT_LITELLM_MODEL_WORKFLOW_MANAGER = DEFAULT_LITELLM_MODEL # For managing mu
 # Default UI and Reasoning configuration values
 DEFAULT_REASONING_EFFORT = "medium"  # Possible values: "low", "medium", "high"
 DEFAULT_REASONING_STYLE = "full"     # Possible values: "full", "compact", "silent"
-
-# Global dictionary to hold runtime overrides set by /set command
-RUNTIME_OVERRIDES: Dict[str, Any] = {}
 
 # Configuration for the --test-inference summary table
 SHOW_TEST_INFERENCE_NOTES_ERRORS_COLUMN = False # Set to False to hide the "Notes/Errors" column
@@ -290,6 +288,10 @@ SUPPORTED_SET_PARAMS = {
         "env_var": "LITELLM_MAX_TOKENS",
         "description": "Maximum number of tokens for the LLM response (e.g., 4096)." # Corrected description
     },
+    "max_tokens_routing": {
+        "env_var": "LITELLM_MAX_TOKENS_ROUTING",
+        "description": "Maximum number of tokens for the routing LLM response (e.g., 150)."
+    },
     "reasoning_style": {
         "env_var": "REASONING_STYLE",
         "allowed_values": ["full", "compact", "silent"],
@@ -384,14 +386,14 @@ def get_model_context_window(model_name: str, return_match_status: bool = False)
     return context_window
 
 
-def get_config_value(param_name: str, default_value: Any, console_obj=None) -> Any:
+def get_config_value(param_name: str, default_value: Any, runtime_overrides: Dict[str, Any], console_obj=None) -> Any:
     """
     Retrieves a configuration value based on precedence:
     1. Runtime overrides
     2. Environment variables
     4. Provided default value
     """
-    # Ensure param_name is valid before proceeding
+    # Ensure param_name is valid before proceeding (RUNTIME_OVERRIDES is now passed in)
     if param_name not in SUPPORTED_SET_PARAMS:
         # This case should ideally not be reached if callers use valid param_names
         if console_obj:
@@ -399,9 +401,10 @@ def get_config_value(param_name: str, default_value: Any, console_obj=None) -> A
         return default_value
         
     p_config = SUPPORTED_SET_PARAMS[param_name]
-    runtime_val = RUNTIME_OVERRIDES.get(param_name)
+    runtime_val = runtime_overrides.get(param_name)
     if runtime_val is not None:
         if param_name == "max_tokens": return int(runtime_val) if isinstance(runtime_val, str) and runtime_val.isdigit() else runtime_val
+        if param_name == "max_tokens_routing": return int(runtime_val) if isinstance(runtime_val, str) and runtime_val.isdigit() else runtime_val
         if param_name == "temperature": return float(runtime_val) if isinstance(runtime_val, (str, int, float)) else runtime_val # Allow int for temp
         return runtime_val
     
@@ -412,6 +415,7 @@ def get_config_value(param_name: str, default_value: Any, console_obj=None) -> A
 
     if env_val is not None:
         if param_name == "max_tokens": return int(env_val) if env_val.isdigit() else default_value
+        if param_name == "max_tokens_routing": return int(env_val) if env_val.isdigit() else default_value
         if param_name == "temperature":
             try: return float(env_val)
             except ValueError: return default_value
