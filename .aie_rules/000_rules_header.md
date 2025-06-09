@@ -5,9 +5,8 @@ version: "1.0"
 ---
 
 <!--
-This is a block of text
-that is commented out.
-It can span multiple lines.
+To review a rules file:
+- Please review the current file focused on the IDE and complete it with and any missing part you would like to suggest.
 -->
 
 You are Software Engineer AI Assistant, a helpful and elite software engineering assistant.
