@@ -20,7 +20,6 @@ import os
 import sys
 import argparse
 import time
-import re
 from pathlib import Path
 
 # Import default constants from config_utils first
@@ -55,7 +54,7 @@ from src import rules_manager # New import for rules system
 from src.llm_interaction import stream_llm_response
 from src.prompts import RichMarkdown # If RichMarkdown is used directly for help panel
 
-# Import Rich components if used directly in this file (e.g., for welcome panel)
+# Import Rich components
 from rich.panel import Panel
 from rich.console import Console # For specific stderr prints if needed
 
@@ -65,24 +64,8 @@ import litellm
 
 __version__ = "0.2.2" # Updated version for refactor
 
-# Module-level model configurations (loaded from env or defaults)
-# These are used by get_config_value, which now takes runtime_overrides from AppState
-LITELLM_MODEL = os.getenv("LITELLM_MODEL", DEFAULT_LITELLM_MODEL)
-LITELLM_MODEL_DEFAULT = LITELLM_MODEL
-LITELLM_MODEL_ROUTING = os.getenv("LITELLM_MODEL_ROUTING", DEFAULT_LITELLM_MODEL_ROUTING)
-LITELLM_MODEL_TOOLS = os.getenv("LITELLM_MODEL_TOOLS", DEFAULT_LITELLM_MODEL_TOOLS)
-LITELLM_MODEL_CODING = os.getenv("LITELLM_MODEL_CODING", DEFAULT_LITELLM_MODEL_CODING)
-LITELLM_MODEL_SUMMARIZE = os.getenv("LITELLM_MODEL_SUMMARIZE", DEFAULT_LITELLM_MODEL_SUMMARIZE)
-LITELLM_MODEL_KNOWLEDGE = os.getenv("LITELLM_MODEL_KNOWLEDGE", DEFAULT_LITELLM_MODEL_KNOWLEDGE)
-LITELLM_MODEL_PLANNER = os.getenv("LITELLM_MODEL_PLANNER", DEFAULT_LITELLM_MODEL_PLANNER)
-LITELLM_MODEL_TASK_MANAGER = os.getenv("LITELLM_MODEL_TASK_MANAGER", DEFAULT_LITELLM_MODEL_TASK_MANAGER)
-LITELLM_MODEL_RULE_ENHANCER = os.getenv("LITELLM_MODEL_RULE_ENHANCER", DEFAULT_LITELLM_MODEL_RULE_ENHANCER)
-LITELLM_MODEL_PROMPT_ENHANCER = os.getenv("LITELLM_MODEL_PROMPT_ENHANCER", DEFAULT_LITELLM_MODEL_PROMPT_ENHANCER)
-LITELLM_MODEL_WORKFLOW_MANAGER = os.getenv("LITELLM_MODEL_WORKFLOW_MANAGER", DEFAULT_LITELLM_MODEL_WORKFLOW_MANAGER)
-
-LITELLM_MAX_TOKENS = int(os.getenv("LITELLM_MAX_TOKENS", DEFAULT_LITELLM_MAX_TOKENS))
-REASONING_EFFORT = os.getenv("REASONING_EFFORT", DEFAULT_REASONING_EFFORT)
-REASONING_STYLE = os.getenv("REASONING_STYLE", DEFAULT_REASONING_STYLE)
+# Note: Module-level model configurations (LITELLM_MODEL, LITELLM_MAX_TOKENS, etc.)
+# are now expected to be handled directly by `get_config_value` using the DEFAULT_ constants as fallbacks.
 
 # Suppress LiteLLM debug info
 litellm.suppress_debug_info = True
@@ -92,21 +75,21 @@ logging.getLogger("litellm").setLevel(logging.WARNING)
 
 def display_welcome_panel(app_state: AppState):
     """Displays the welcome panel."""
-    current_model_name_for_display = get_config_value("model", LITELLM_MODEL_DEFAULT, app_state.RUNTIME_OVERRIDES, app_state.console)
+    current_model_name_for_display = get_config_value("model", DEFAULT_LITELLM_MODEL, app_state.RUNTIME_OVERRIDES, app_state.console)
     context_window_size_display, used_default_display = get_model_context_window(current_model_name_for_display, return_match_status=True)
     context_window_display_str = f"Context:{context_window_size_display // 1024}k tokens"
     current_working_directory = os.getcwd()
     if used_default_display:
         context_window_display_str += " (default)"
-        
+
     instructions = f"""  📁 [bold bright_blue]Current Directory: [/bold bright_blue][bold green]{current_working_directory}[/bold green]
 
   🧠 [bold bright_blue]Default Model: [/bold bright_blue][bold magenta]{current_model_name_for_display}[/bold magenta] ([dim]{context_window_display_str}[/dim])
-     Routing: [dim]{get_config_value("model_routing", LITELLM_MODEL_ROUTING, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim] | Tools: [dim]{get_config_value("model_tools", LITELLM_MODEL_TOOLS, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim]
-     Coding: [dim]{get_config_value("model_coding", LITELLM_MODEL_CODING, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim] | Knowledge: [dim]{get_config_value("model_knowledge", LITELLM_MODEL_KNOWLEDGE, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim]
-     Summarize: [dim]{get_config_value("model_summarize", LITELLM_MODEL_SUMMARIZE, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim] | Planner: [dim]{get_config_value("model_planner", LITELLM_MODEL_PLANNER, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim]
-     Task Mgr: [dim]{get_config_value("model_task_manager", LITELLM_MODEL_TASK_MANAGER, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim] | Rule Enh: [dim]{get_config_value("model_rule_enhancer", LITELLM_MODEL_RULE_ENHANCER, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim]
-     Prompt Enh: [dim]{get_config_value("model_prompt_enhancer", LITELLM_MODEL_PROMPT_ENHANCER, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim] | Workflow Mgr: [dim]{get_config_value("model_workflow_manager", LITELLM_MODEL_WORKFLOW_MANAGER, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim]
+     Routing: [dim]{get_config_value("model_routing", DEFAULT_LITELLM_MODEL_ROUTING, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim] | Tools: [dim]{get_config_value("model_tools", DEFAULT_LITELLM_MODEL_TOOLS, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim]
+     Coding: [dim]{get_config_value("model_coding", DEFAULT_LITELLM_MODEL_CODING, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim] | Knowledge: [dim]{get_config_value("model_knowledge", DEFAULT_LITELLM_MODEL_KNOWLEDGE, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim]
+     Summarize: [dim]{get_config_value("model_summarize", DEFAULT_LITELLM_MODEL_SUMMARIZE, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim] | Planner: [dim]{get_config_value("model_planner", DEFAULT_LITELLM_MODEL_PLANNER, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim]
+     Task Mgr: [dim]{get_config_value("model_task_manager", DEFAULT_LITELLM_MODEL_TASK_MANAGER, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim] | Rule Enh: [dim]{get_config_value("model_rule_enhancer", DEFAULT_LITELLM_MODEL_RULE_ENHANCER, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim]
+     Prompt Enh: [dim]{get_config_value("model_prompt_enhancer", DEFAULT_LITELLM_MODEL_PROMPT_ENHANCER, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim] | Workflow Mgr: [dim]{get_config_value("model_workflow_manager", DEFAULT_LITELLM_MODEL_WORKFLOW_MANAGER, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim]
 
   ❓ [bold bright_blue]/help[/bold bright_blue] - Documentation runtime entry point.
 
@@ -141,9 +124,9 @@ def get_context_usage_prompt_string(app_state: AppState) -> str:
 
     if messages_for_count: # Only proceed if there's something to count (system prompt or history)
         try:
-            active_model_for_prompt_context = get_config_value("model", LITELLM_MODEL_DEFAULT, app_state.RUNTIME_OVERRIDES, app_state.console)
+            active_model_for_prompt_context = get_config_value("model", DEFAULT_LITELLM_MODEL, app_state.RUNTIME_OVERRIDES, app_state.console)
             context_window_size_prompt, used_default_prompt = get_model_context_window(active_model_for_prompt_context, return_match_status=True)
-            
+
             if active_model_for_prompt_context: # Ensure model name is available
                 tokens_used = token_counter(model=active_model_for_prompt_context, messages=messages_for_count)
                 if context_window_size_prompt > 0:
@@ -160,33 +143,55 @@ def get_context_usage_prompt_string(app_state: AppState) -> str:
             pass
     return prefix
 
+# --- Command Handler Registries ---
+MAIN_LOOP_COMMAND_HANDLERS = [
+    command_handlers.try_handle_add_command,
+    command_handlers.try_handle_set_command,
+    command_handlers.try_handle_help_command,
+    command_handlers.try_handle_shell_command,
+    command_handlers.try_handle_session_command, # Alias for /context
+    command_handlers.try_handle_rules_command,
+    command_handlers.try_handle_context_command,
+    command_handlers.try_handle_prompt_command,
+    command_handlers.try_handle_script_command, # For interactive /script
+    command_handlers.try_handle_ask_command,
+    command_handlers.try_handle_debug_command,
+    command_handlers.try_handle_time_command,
+    inference_tester.try_handle_test_command,
+]
+
+SCRIPT_EXECUTION_COMMAND_HANDLERS = [
+    command_handlers.try_handle_add_command,
+    command_handlers.try_handle_set_command,
+    command_handlers.try_handle_help_command,
+    command_handlers.try_handle_shell_command,
+    command_handlers.try_handle_session_command, # Alias for /context
+    command_handlers.try_handle_rules_command,
+    command_handlers.try_handle_context_command,
+    command_handlers.try_handle_prompt_command,
+    inference_tester.try_handle_test_command,
+    # Note: /script itself is not typically called from within a script.
+    # /debug and /time are interactive toggles, less common/useful in non-interactive scripts.
+]
+
 def execute_script_line(line: str, app_state: AppState):
     """Executes a single line from a script file."""
     app_state.console.print(f"\n[bold bright_magenta]📜 Script> {line}[/bold bright_magenta]")
     
-    # Try command handlers first
-    if command_handlers.try_handle_add_command(line, app_state): return
-    if command_handlers.try_handle_set_command(line, app_state): return
-    if command_handlers.try_handle_help_command(line, app_state): return
-    if command_handlers.try_handle_shell_command(line, app_state): return
-    if command_handlers.try_handle_session_command(line, app_state): return # Alias for /context
-    if command_handlers.try_handle_rules_command(line, app_state): return
-    if command_handlers.try_handle_context_command(line, app_state): return
-    if command_handlers.try_handle_prompt_command(line, app_state): return
-    if inference_tester.try_handle_test_command(line, app_state): return
-    # Note: /debug and /time are interactive toggles, less common in scripts but could be supported
-    # if command_handlers.try_handle_debug_command(line, app_state): return
-    # if command_handlers.try_handle_time_command(line, app_state): return
+    # Try registered command handlers for script execution
+    for handler_func in SCRIPT_EXECUTION_COMMAND_HANDLERS:
+        if handler_func(line, app_state):
+            return # Command was handled
 
     # If not a known command, treat as a prompt for the LLM
-    target_model_for_script_line = get_config_value("model", LITELLM_MODEL_DEFAULT, app_state.RUNTIME_OVERRIDES, app_state.console)
+    target_model_for_script_line = get_config_value("model", DEFAULT_LITELLM_MODEL, app_state.RUNTIME_OVERRIDES, app_state.console)
     is_script_command = line.startswith("/") # Re-check, though most /commands are handled above
-    
+
     if line and not is_script_command:
         app_state.console.print("[dim]↪ Routing query...[/dim]")
         expert_keyword_script = routing_logic.get_routing_expert_keyword(line, app_state)
         target_model_for_script_line = routing_logic.map_expert_to_model(expert_keyword_script, app_state)
-    
+
     stream_llm_response(
         line,
         app_state,
@@ -218,12 +223,12 @@ def main():
     parser.add_argument('--noconfirm', action='store_true', help='Skip confirmation prompts when using --script.')
     parser.add_argument('--time', action='store_true', help='Enable timestamp display in the user prompt.')
     parser.add_argument(
-        '--test-inference', metavar='MODEL_NAME', type=str, nargs='?', 
-        const='__TEST_ALL_MODELS__', 
+        '--test-inference', metavar='MODEL_NAME', type=str, nargs='?',
+        const='__TEST_ALL_MODELS__',
         help='Test capabilities. If MODEL_NAME (wildcards * and ? supported), tests matching models. Else, tests all.'
     )
     args = parser.parse_args()
-    
+
     clear_screen()
 
     if args.test_inference is not None:
@@ -247,12 +252,12 @@ def main():
             timestamp_str = ""
             if app_state.SHOW_TIMESTAMP_IN_PROMPT:
                 timestamp_str = f"{time.strftime('%H:%M:%S')} "
-            
+
             user_input = app_state.prompt_session.prompt(f"{timestamp_str}🔵 {context_usage_str}You> ").strip()
         except (EOFError, KeyboardInterrupt):
             app_state.console.print("\n[bold yellow]👋 Exiting gracefully...[/bold yellow]")
             sys.exit(0)
-        
+
         if not user_input:
             continue
         
@@ -262,19 +267,10 @@ def main():
 
         # Dispatch to command handlers
         command_handled = False
-        if command_handlers.try_handle_add_command(user_input, app_state): command_handled = True
-        elif command_handlers.try_handle_set_command(user_input, app_state): command_handled = True
-        elif command_handlers.try_handle_help_command(user_input, app_state): command_handled = True
-        elif command_handlers.try_handle_shell_command(user_input, app_state): command_handled = True
-        elif command_handlers.try_handle_session_command(user_input, app_state): command_handled = True
-        elif command_handlers.try_handle_rules_command(user_input, app_state): command_handled = True
-        elif command_handlers.try_handle_context_command(user_input, app_state): command_handled = True
-        elif command_handlers.try_handle_prompt_command(user_input, app_state): command_handled = True
-        elif command_handlers.try_handle_script_command(user_input, app_state): command_handled = True # For interactive /script
-        elif command_handlers.try_handle_ask_command(user_input, app_state): command_handled = True
-        elif command_handlers.try_handle_debug_command(user_input, app_state): command_handled = True
-        elif command_handlers.try_handle_time_command(user_input, app_state): command_handled = True
-        elif inference_tester.try_handle_test_command(user_input, app_state): command_handled = True
+        for handler_func in MAIN_LOOP_COMMAND_HANDLERS:
+            if handler_func(user_input, app_state):
+                command_handled = True
+                break
         
         if command_handled:
             continue
@@ -286,23 +282,24 @@ def main():
 
 
         # --- Routing Step for non-commands ---
-        target_model_for_this_turn = get_config_value("model", LITELLM_MODEL_DEFAULT, app_state.RUNTIME_OVERRIDES, app_state.console)
-        
+        target_model_for_this_turn = get_config_value("model", DEFAULT_LITELLM_MODEL, app_state.RUNTIME_OVERRIDES, app_state.console)
+
         app_state.console.print("[dim]↪ Routing query...[/dim]")
 
+        import re # Moved import here as it's only used in this block
         greeting_pattern_for_routing_bypass = r"^\s*(hello|hi|hey|good\s+(morning|afternoon|evening)|how\s+are\s+you|how's\s+it\s+going|what's\s+up|sup)[\s!\.,\?]*\s*$"
         is_simple_greeting_for_bypass = bool(re.match(greeting_pattern_for_routing_bypass, user_input.strip(), re.IGNORECASE))
 
         if is_simple_greeting_for_bypass:
             if app_state.DEBUG_LLM_INTERACTIONS:
-                Console(stderr=True).print("[dim]ROUTER DEBUG: Simple greeting detected, bypassing LLM router, using DEFAULT expert.[/dim]")
+                app_state.console.print("[dim]ROUTER DEBUG: Simple greeting detected, bypassing LLM router, using DEFAULT expert.[/dim]", stderr=True)
             expert_keyword = "DEFAULT"
-            target_model_for_this_turn = routing_logic.map_expert_to_model(expert_keyword, app_state) 
+            target_model_for_this_turn = routing_logic.map_expert_to_model(expert_keyword, app_state)
             app_state.console.print(f"[dim]  ➔ Routed to: {expert_keyword} (Bypassed for greeting)[/dim]")
         else:
             expert_keyword = routing_logic.get_routing_expert_keyword(user_input, app_state)
             target_model_for_this_turn = routing_logic.map_expert_to_model(expert_keyword, app_state)
-        
+
         # --- End Routing Step ---
 
         stream_llm_response(
