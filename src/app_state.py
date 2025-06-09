@@ -1,10 +1,10 @@
 # src/app_state.py
+import os
 from rich.console import Console
 from prompt_toolkit import PromptSession
 from prompt_toolkit.styles import Style as PromptStyle
 from typing import List, Dict, Any
 
-from src.prompts import system_PROMPT
 
 class AppState:
     def __init__(self):
@@ -16,10 +16,11 @@ class AppState:
                 'completion-menu.completion.current': 'bg:#3b82f6 fg:#ffffff bold',
             })
         )
-        self.conversation_history: List[Dict[str, Any]] = [
-            {"role": "system", "content": system_PROMPT}
-        ]
+        # Conversation history will store user/assistant/tool turns.
+        # The system prompt is managed by self.system_prompt and prepended by llm_interaction.
+        self.conversation_history: List[Dict[str, Any]] = []
         self.DEBUG_LLM_INTERACTIONS: bool = False
         self.SHOW_TIMESTAMP_IN_PROMPT: bool = False
         self.RUNTIME_OVERRIDES: Dict[str, Any] = {}
-        # Potentially add other shared states if they become numerous
+        self.DEBUG_RULES = os.getenv("AIE_DEBUG_RULES", "false").lower() == "true"
+        self.system_prompt = "" # Will be populated by rules_manager.initialize_rules_system

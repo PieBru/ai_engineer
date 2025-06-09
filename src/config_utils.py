@@ -316,6 +316,65 @@ SUPPORTED_SET_PARAMS = {
     }
 }
 
+def update_runtime_override(param_name: str, value: Any, runtime_overrides: Dict[str, Any], console_obj=None):
+    """
+    Updates a runtime override for a given parameter.
+    Validates against SUPPORTED_SET_PARAMS.
+    """
+    param_name_lower = param_name.lower()
+    if param_name_lower not in SUPPORTED_SET_PARAMS:
+        if console_obj:
+            console_obj.print(f"[red]Error: Unknown parameter '{param_name}'. Cannot set override.[/red]")
+        return
+
+    config_details = SUPPORTED_SET_PARAMS[param_name_lower]
+    allowed_values = config_details.get("allowed_values")
+
+    # Type conversion and validation
+    if param_name_lower in ["max_tokens", "max_tokens_routing"]:
+        try:
+            value = int(value)
+            if value <= 0:
+                raise ValueError("Max tokens must be a positive integer.")
+        except ValueError:
+            if console_obj:
+                console_obj.print(f"[red]Error: Invalid value '{value}' for {param_name_lower}. Must be a positive integer.[/red]")
+            return
+    elif param_name_lower == "temperature":
+        try:
+            value = float(value)
+            if not (0.0 <= value <= 2.0): # Common range for temperature
+                raise ValueError("Temperature must be between 0.0 and 2.0.")
+        except ValueError:
+            if console_obj:
+                console_obj.print(f"[red]Error: Invalid value '{value}' for {param_name_lower}. Must be a number (e.g., 0.7).[/red]")
+            return
+
+    if allowed_values and str(value).lower() not in allowed_values:
+        if console_obj:
+            console_obj.print(f"[red]Error: Invalid value '{value}' for {param_name_lower}. Allowed values: {', '.join(allowed_values)}[/red]")
+        return
+
+    runtime_overrides[param_name_lower] = value
+    if console_obj:
+        console_obj.print(f"[green]✓ Runtime override set: {param_name_lower} = {value}[/green]")
+
+def remove_runtime_override(param_name: str, runtime_overrides: Dict[str, Any], console_obj=None):
+    """Removes a runtime override."""
+    if param_name.lower() in runtime_overrides:
+        del runtime_overrides[param_name.lower()]
+        if console_obj: console_obj.print(f"[yellow]✓ Runtime override removed for: {param_name.lower()}[/yellow]")
+    elif console_obj: console_obj.print(f"[dim]No runtime override found for '{param_name.lower()}' to remove.[/dim]")
+
+def list_runtime_overrides(runtime_overrides: Dict[str, Any], console_obj):
+    """Lists current runtime overrides."""
+    if not runtime_overrides:
+        console_obj.print("[dim]No active runtime overrides.[/dim]")
+        return
+    console_obj.print("[bold blue]Active Runtime Overrides:[/bold blue]")
+    for key, value in runtime_overrides.items():
+        console_obj.print(f"  - {key}: {value}")
+
 def load_configuration(console_obj):
     """
     Loads .env file into environment variables.

@@ -127,20 +127,18 @@ def execute_function_call_dict(
 def trim_conversation_history(conversation_history: list):
     """
     Trims the conversation history if it exceeds a certain length,
-    prioritizing system messages and recent non-system messages.
+    keeping only the most recent messages.
+    Assumes conversation_history does NOT contain the main system prompt.
+    It only contains user, assistant, and tool messages.
     """
-    if len(conversation_history) <= 20: # Max length before trimming
+    MAX_HISTORY_MESSAGES = 15 # Max number of user/assistant/tool messages to keep
+    if len(conversation_history) <= MAX_HISTORY_MESSAGES:
         return
 
-    system_msgs = [msg for msg in conversation_history if msg["role"] == "system"]
-    other_msgs = [msg for msg in conversation_history if msg["role"] != "system"]
-
-    # Keep the last 15 non-system messages
-    if len(other_msgs) > 15:
-        other_msgs = other_msgs[-15:]
-
+    # Keep the last MAX_HISTORY_MESSAGES messages
+    trimmed_history = conversation_history[-MAX_HISTORY_MESSAGES:]
     conversation_history.clear()
-    conversation_history.extend(system_msgs + other_msgs)
+    conversation_history.extend(trimmed_history)
 
 
 def stream_llm_response(
@@ -154,8 +152,16 @@ def stream_llm_response(
     Returns a dictionary indicating success or error.
     """
     trim_conversation_history(app_state.conversation_history)
+    
     try:
-        messages_for_api_call = copy.deepcopy(app_state.conversation_history)
+        messages_for_api_call = []
+        # Add system prompt (which is now the combined rules from app_state.system_prompt)
+        if app_state.system_prompt and app_state.system_prompt.strip():
+            messages_for_api_call.append({"role": "system", "content": app_state.system_prompt})
+
+        # Add conversation history (user/assistant/tool turns)
+        for msg in app_state.conversation_history: # This history no longer contains the main system prompt
+            messages_for_api_call.append(msg)
 
         default_reply_effort_val = "medium"
         default_temperature_val = 0.6
@@ -293,12 +299,16 @@ def stream_llm_response(
                         app_state.console.print("\n[bold blue]💭 Reasoning...[/bold blue]", end="")
                         reasoning_started_printed = True
                     app_state.console.print(".", end="")
-            elif delta.content:
+            elif delta.content: # This is the main assistant reply content
+                timestamp_str = ""
+                if app_state.SHOW_TIMESTAMP_IN_PROMPT:
+                    timestamp_str = f"{time.strftime('%H:%M:%S')} "
+
                 if reasoning_started_printed and reasoning_style != "full":
                     app_state.console.print() # Newline after compact reasoning dots
                     reasoning_started_printed = False
                 if not final_content: # First part of the actual reply
-                    app_state.console.print("\n[bold bright_blue]🤖 Assistant>[/bold bright_blue] ", end="")
+                    app_state.console.print(f"\n{timestamp_str}[bold bright_blue]🤖 Assistant>[/bold bright_blue] ", end="")
                 final_content += delta.content
                 app_state.console.print(delta.content, end="")
             elif delta.tool_calls:

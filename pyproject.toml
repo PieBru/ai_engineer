@@ -12,6 +12,7 @@ dependencies = [
     "rich>=14.0.0",     # As seen in requirements.txt
     "httpx>=0.28.1",    # As seen in requirements.txt
     "markdown>=3.8",    # As seen in requirements.txt
+    "PyYAML>=5.0",
 ]
 
 [project.optional-dependencies] # Dependencies required for development and testing

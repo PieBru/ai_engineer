@@ -51,6 +51,7 @@ from src.config_utils import (
 from src import command_handlers
 from src import routing_logic
 from src import inference_tester
+from src import rules_manager # New import for rules system
 from src.llm_interaction import stream_llm_response
 from src.prompts import RichMarkdown # If RichMarkdown is used directly for help panel
 
@@ -129,22 +130,34 @@ def get_context_usage_prompt_string(app_state: AppState) -> str:
     Returns an empty string if context info cannot be determined.
     """
     prefix = ""
-    if app_state.conversation_history:
+    # Construct messages for token counting, including the system prompt
+    messages_for_count = []
+    if app_state.system_prompt and app_state.system_prompt.strip():
+        messages_for_count.append({"role": "system", "content": app_state.system_prompt})
+    
+    # Add conversation history only if it's not empty
+    if app_state.conversation_history: # Check if there's any history to add
+        messages_for_count.extend(app_state.conversation_history)
+
+    if messages_for_count: # Only proceed if there's something to count (system prompt or history)
         try:
             active_model_for_prompt_context = get_config_value("model", LITELLM_MODEL_DEFAULT, app_state.RUNTIME_OVERRIDES, app_state.console)
             context_window_size_prompt, used_default_prompt = get_model_context_window(active_model_for_prompt_context, return_match_status=True)
             
-            if app_state.conversation_history and active_model_for_prompt_context:
-                tokens_used = token_counter(model=active_model_for_prompt_context, messages=app_state.conversation_history)
+            if active_model_for_prompt_context: # Ensure model name is available
+                tokens_used = token_counter(model=active_model_for_prompt_context, messages=messages_for_count)
                 if context_window_size_prompt > 0:
                     percentage_used = (tokens_used / context_window_size_prompt) * 100
                     default_note = " (default window)" if used_default_prompt else ""
                     prefix = f"[Ctx: {percentage_used:.0f}%{default_note}] "
                 else:
                     prefix = f"[Ctx: {tokens_used} toks] "
-        except Exception:
-            # If token counting fails, don't break the prompt
-            pass 
+        except Exception as e:
+            if app_state.DEBUG_LLM_INTERACTIONS: # Or a new DEBUG_CONTEXT_USAGE flag
+                app_state.console.print(f"[dim red]Error calculating context usage: {e}[/dim red]", stderr=True)
+            # Silently pass if not debugging, to avoid breaking the prompt line
+            # but the error will be logged if debug is on.
+            pass
     return prefix
 
 def execute_script_line(line: str, app_state: AppState):
@@ -191,6 +204,10 @@ def main():
 
     # Load .env, config.toml
     load_app_configuration(app_state.console) # This might set some initial RUNTIME_OVERRIDES if config.toml is used
+
+    # Initialize the rules system (ensure dirs, load system rules, build initial prompt)
+    # This should happen after config is loaded (in case DEBUG_RULES is set in config)
+    rules_manager.initialize_rules_system(app_state)
 
     parser = argparse.ArgumentParser(
         description="Software Engineer AI Assistant: An AI-powered coding assistant.",
