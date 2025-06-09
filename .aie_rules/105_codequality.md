@@ -1,3 +1,8 @@
+---
+description: "Specific guidelines for AI interaction and code change presentation to ensure clarity and control."
+author: "AI Engineer Team"
+version: "1.0"
+---
 # Code Quality Guidelines
 
 ## Verify Information
@@ -30,6 +35,9 @@ Don't remove unrelated code or functionalities. Pay attention to preserving exis
 ## Single Chunk Edits
 Provide all edits in a single chunk instead of multiple-step instructions or explanations for the same file.
 
+## Exactness
+Follow instructions precisely. Do not deviate or add extra information unless explicitly asked.
+
 ## No Implementation Checks
 Don't ask the user to verify implementations that are visible in the provided context.
 
@@ -41,3 +49,9 @@ Always provide links to the real files, not x.md.
 
 ## No Current Implementation
 Don't show or discuss the current implementation unless specifically requested.
+
+## Focus on the Request
+Address only the specific task or question asked. Avoid tangential discussions or suggestions.
+
+## Code Formatting Consistency
+When providing code, ensure it adheres to the established formatting standards of the project (e.g., Black for Python, Prettier for JS/TS). Do not introduce new formatting styles.

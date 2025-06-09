@@ -12,8 +12,8 @@ from src.prompts import RichMarkdown # For displaying rule content
 
 # Define rule directories (relative to project root)
 # These could be made configurable later if needed.
-RULES_DIR_ACTIVE = Path("./.aie_rules")
-RULES_DIR_ALL = Path("./.aie_rules_all")
+RULES_DIR_ACTIVE = Path("./.aie_rules_enabled")
+RULES_DIR_ALL = Path("./.aie_rules")
 SYSTEM_RULES_FILENAMES = ["000_rules_header.md", "999_rules_trailer.md"]
 
 # Configuration key for rule application order (if you implement prepend/append to user message)
@@ -93,8 +93,8 @@ def initialize_rules_system(app_state: AppState):
     """
     ensure_rule_directories_exist(app_state)
     
-    # Ensure system rules are present in .aie_rules/
-    # These are copied from .aie_rules_all/
+    # Ensure system rules are present in .aie_rules_enabled/
+    # These are copied from .aie_rules/
     for rule_filename in SYSTEM_RULES_FILENAMES:
         source_path = RULES_DIR_ALL / rule_filename
         dest_path = RULES_DIR_ACTIVE / rule_filename
@@ -145,7 +145,7 @@ def list_rules_command(app_state: AppState, list_filter: str):
     all_master_rule_paths = sorted(RULES_DIR_ALL.glob("*.md*"))
 
     if list_filter == "enabled" or list_filter == "all":
-        output_text.append("Active Rules (in ./.aie_rules/):\n", style="bold green")
+        output_text.append("Active Rules (in ./.aie_rules_enabled/):\n", style="bold green")
         if not active_rule_paths:
             output_text.append("  No active rules.\n")
         for rule_file_path in active_rule_paths:
@@ -156,7 +156,7 @@ def list_rules_command(app_state: AppState, list_filter: str):
     if list_filter == "disabled" or list_filter == "all":
         if list_filter == "all": # Add a separator if both sections are printed
              output_text.append("\n")
-        output_text.append("Available Rules (in ./.aie_rules_all/):\n", style="bold yellow")
+        output_text.append("Available Rules (in ./.aie_rules/):\n", style="bold yellow")
         
         found_any_in_all = False
         displayed_disabled_count = 0
@@ -177,7 +177,7 @@ def list_rules_command(app_state: AppState, list_filter: str):
                 displayed_disabled_count +=1
         
         if not found_any_in_all:
-            output_text.append("  No rules found in .aie_rules_all/ directory.\n")
+            output_text.append("  No rules found in .aie_rules/ directory.\n")
         elif list_filter == "disabled" and displayed_disabled_count == 0:
              output_text.append("  All available rules are currently active.\n")
 
@@ -246,7 +246,7 @@ def reset_rules_command(app_state: AppState):
 
     app_state.console.print("[yellow]Resetting active rules to system defaults...[/yellow]")
     
-    # 1. Clear all files from ./.aie_rules/
+    # 1. Clear all files from ./.aie_rules_enabled/
     for item in RULES_DIR_ACTIVE.iterdir():
         if item.is_file(): # Only delete files
             try:

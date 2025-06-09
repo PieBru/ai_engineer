@@ -1,3 +1,8 @@
+---
+description: "Comprehensive rules and guidelines for implementing the Gitflow workflow."
+author: "AI Engineer Team"
+version: "1.0"
+---
 
 # Gitflow Workflow Rules
 
@@ -16,6 +21,7 @@
 - Contains latest delivered development changes
 - Source branch for feature branches
 - Never commit directly to develop
+- Regularly merge `main` back into `develop` after releases/hotfixes to keep it up-to-date.
 
 ## Supporting Branches
 
@@ -25,6 +31,7 @@
 - Naming convention: feature/[issue-id]-descriptive-name
 - Example: feature/123-user-authentication
 - Must be up-to-date with develop before creating PR
+- Rebase feature branches onto `develop` before merging to maintain a clean history, or use squash merges.
 - Delete after merge
 
 ### release/*
@@ -59,6 +66,8 @@
   - refactor: Code refactoring
   - test: Adding tests
   - chore: Maintenance tasks
+- Scope can be optional but recommended for clarity (e.g., `feat(auth): add login endpoint`).
+- Description should be concise and in the imperative mood (e.g., "add login endpoint" not "added login endpoint").
 
 ## Version Control
 
@@ -73,6 +82,7 @@
 2. Required approvals: minimum 1
 3. CI checks must pass
 4. No direct commits to protected branches (main, develop)
+- Resolve all discussions/comments before merging.
 5. Branch must be up to date before merging
 6. Delete branch after merge
 
@@ -85,6 +95,7 @@
 - Include administrators in restrictions
 - No force pushes
 - No deletions
+- Consider enabling "Require linear history" on `develop` if using rebase/squash merges for features.
 
 ## Release Process
 
@@ -92,6 +103,7 @@
 2. Bump version numbers
 3. Fix any release-specific issues
 4. Create PR to main
+5. Perform final QA and testing on the release branch.
 5. After merge to main:
    - Tag release
    - Merge back to develop
@@ -102,6 +114,7 @@
 1. Create hotfix branch from main
 2. Fix the issue
 3. Bump patch version
+4. Perform urgent QA and testing on the hotfix branch.
 4. Create PR to main
 5. After merge to main:
    - Tag release

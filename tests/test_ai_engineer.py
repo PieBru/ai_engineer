@@ -488,7 +488,7 @@ class TestRulesCommand:
     def test_try_handle_rules_command_list_dir_not_found(self, mock_Path_class, mock_console_print):
         mock_rules_dir_instance = MagicMock()
         mock_rules_dir_instance.iterdir.side_effect = FileNotFoundError("Simulated iterdir error")
-        mock_rules_dir_instance.__str__.return_value = ".aie_rules" # Control string representation
+        mock_rules_dir_instance.__str__.return_value = ".aie_rules_enabled" # Control string representation
         mock_Path_class.return_value = mock_rules_dir_instance
 
     @patch('ai_engineer.console.print')
@@ -496,7 +496,7 @@ class TestRulesCommand:
     def test_try_handle_rules_command_list_success(self, mock_path, mock_console_print):
         mock_rules_dir = MagicMock()
         mock_path.return_value = mock_rules_dir
-        mock_rules_dir.__str__.return_value = str(Path("./.aie_rules/")) # Ensure correct string representation
+        mock_rules_dir.__str__.return_value = str(Path("./.aie_rules_enabled/")) # Ensure correct string representation
         
         # Mock iterdir to return mock file objects
         mock_file1 = MagicMock()
@@ -513,12 +513,12 @@ class TestRulesCommand:
 
         handled = de.try_handle_rules_command("/rules list")
         assert handled
-        mock_path.assert_called_once_with("./.aie_rules/")
+        mock_path.assert_called_once_with("./.aie_rules_enabled/")
         mock_rules_dir.iterdir.assert_called_once()
         
         # Check console output
-        # Path("./.aie_rules/") stringifies to ".aie_rules"
-        mock_console_print.assert_any_call(f"\n[bold blue]📚 Rules files in '[bright_cyan]{str(Path('./.aie_rules/'))}[/bright_cyan]':[/bold blue]")
+        # Path("./.aie_rules_enabled/") stringifies to ".aie_rules_enabled"
+        mock_console_print.assert_any_call(f"\n[bold blue]📚 Rules files in '[bright_cyan]{str(Path('./.aie_rules_enabled/'))}[/bright_cyan]':[/bold blue]")
         mock_console_print.assert_any_call("  - rule1.md")
         mock_console_print.assert_any_call("  - rule2.txt")
 
@@ -589,7 +589,7 @@ class TestRulesCommand:
         de.RUNTIME_OVERRIDES['system_prompt'] = "some/path/to/custom_prompt.md" # Simulate a runtime override
 
         mock_prompt_session.prompt.return_value = "y" # Confirm loading default
-        default_rules_path_obj = Path("./.aie_rules/_default.md")
+        default_rules_path_obj = Path("./.aie_rules_enabled/_default.md")
         mock_normalize.return_value = str(default_rules_path_obj.resolve()) # Mock normalization
         mock_read_file.return_value = "Default rule content."
 

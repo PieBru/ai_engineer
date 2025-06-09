@@ -1,3 +1,8 @@
+---
+description: "Comprehensive database best practices, including Prisma, Supabase, and general design principles."
+author: "AI Engineer Team"
+version: "1.0"
+---
 
 # Database Best Practices
 
@@ -15,6 +20,7 @@
 - Use proper field types
 - Define proper indexes
 - Implement proper constraints
+- Use `@default(now())` or similar for `createdAt` and `updatedAt` timestamps.
 - Use proper enums
 
 ## Prisma Queries
@@ -23,6 +29,7 @@
 - Use proper relations loading
 - Handle transactions properly
 - Implement proper pagination
+- Use `select` or `include` wisely to fetch only necessary data.
 - Use proper aggregations
 
 ## Supabase Setup
@@ -46,6 +53,7 @@
 - Implement proper filtering
 - Use proper joins
 - Handle real-time properly
+- Utilize database functions and triggers for complex logic where appropriate.
 - Implement proper pagination
 - Use proper functions
 
@@ -55,6 +63,7 @@
 - Use proper constraints
 - Define proper relations
 - Implement proper cascades
+- Choose appropriate data types to optimize storage and performance.
 - Use proper data types
 
 ## Performance
@@ -63,6 +72,7 @@
 - Use proper query optimization
 - Handle N+1 queries properly
 - Implement proper batching
+- Regularly analyze query performance (e.g., using `EXPLAIN`).
 - Monitor performance metrics
 
 ## Security
@@ -71,6 +81,7 @@
 - Handle sensitive data properly
 - Use proper encryption
 - Implement proper backups
+- Regularly review access controls and permissions.
 - Monitor security issues
 
 ## Best Practices
@@ -78,5 +89,11 @@
 - Use proper migrations
 - Implement proper versioning
 - Handle errors properly
+- Write clear and comprehensive documentation for the database schema and any complex queries or stored procedures.
 - Document schema properly
 - Monitor database health 
+
+## Data Integrity
+- Enforce data integrity using constraints (NOT NULL, UNIQUE, CHECK, FOREIGN KEY).
+- Use transactions to ensure atomicity of operations.
+- Implement validation at the application layer in addition to database constraints.
