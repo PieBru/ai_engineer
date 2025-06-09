@@ -1,4 +1,3 @@
-
 ---
 description: "Rules and available tools for file system operations."
 author: "AI Engineer Team"
