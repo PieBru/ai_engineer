@@ -9,8 +9,6 @@ from rich.json import JSON as RichJSON
 
 from src.config_utils import (
     get_config_value, 
-    DEFAULT_LITELLM_MODEL_ROUTING, 
-    DEFAULT_LITELLM_MAX_TOKENS_ROUTING, # Import the new default
     get_model_test_expectations
 )
 from src.prompts import ROUTING_SYSTEM_PROMPT
@@ -24,14 +22,14 @@ def get_routing_expert_keyword(user_query: str, app_state: 'AppState') -> str:
     """
     Calls the routing LLM to determine which expert should handle the user_query.
     """
-    routing_model_name = get_config_value("model_routing", DEFAULT_LITELLM_MODEL_ROUTING, app_state.RUNTIME_OVERRIDES, app_state.console)
+    routing_model_name = get_config_value("model_routing", app_state.RUNTIME_OVERRIDES, app_state.console)
     if not routing_model_name:
         app_state.console.print("[yellow]Warning: Routing model not configured. Defaulting to DEFAULT expert.[/yellow]")
         return "DEFAULT"
 
     routing_model_expectations = get_model_test_expectations(routing_model_name)
     api_base_from_model_config = routing_model_expectations.get("api_base")
-    globally_configured_api_base = get_config_value("api_base", None, app_state.RUNTIME_OVERRIDES, app_state.console)
+    globally_configured_api_base = get_config_value("api_base", app_state.RUNTIME_OVERRIDES, app_state.console)
 
     routing_api_base: Optional[str]
     if api_base_from_model_config is not None:
@@ -59,7 +57,7 @@ def get_routing_expert_keyword(user_query: str, app_state: 'AppState') -> str:
     
     messages_for_routing = [{"role": "system", "content": prompt_for_router}]
     
-    max_tokens_for_routing = get_config_value("max_tokens_routing", DEFAULT_LITELLM_MAX_TOKENS_ROUTING, app_state.RUNTIME_OVERRIDES, app_state.console)
+    max_tokens_for_routing = get_config_value("max_tokens_routing", app_state.RUNTIME_OVERRIDES, app_state.console)
     completion_params_routing: Dict[str, Any] = {
         "model": routing_model_name,
         "messages": messages_for_routing,
@@ -170,11 +168,7 @@ def map_expert_to_model(expert_keyword: str, app_state: 'AppState') -> str:
     """
     Maps the expert keyword to the corresponding model name.
     """
-    from ai_engineer import ( # Local import to access model constants from the main module
-        DEFAULT_LITELLM_MODEL_TOOLS, DEFAULT_LITELLM_MODEL_CODING,
-        DEFAULT_LITELLM_MODEL_KNOWLEDGE, DEFAULT_LITELLM_MODEL
-    )
-    if expert_keyword == "TOOLS": return get_config_value("model_tools", DEFAULT_LITELLM_MODEL_TOOLS, app_state.RUNTIME_OVERRIDES, app_state.console)
-    if expert_keyword == "CODING": return get_config_value("model_coding", DEFAULT_LITELLM_MODEL_CODING, app_state.RUNTIME_OVERRIDES, app_state.console)
-    if expert_keyword == "KNOWLEDGE": return get_config_value("model_knowledge", DEFAULT_LITELLM_MODEL_KNOWLEDGE, app_state.RUNTIME_OVERRIDES, app_state.console)
-    return get_config_value("model", DEFAULT_LITELLM_MODEL, app_state.RUNTIME_OVERRIDES, app_state.console)
+    if expert_keyword == "TOOLS": return get_config_value("model_tools", app_state.RUNTIME_OVERRIDES, app_state.console)
+    if expert_keyword == "CODING": return get_config_value("model_coding", app_state.RUNTIME_OVERRIDES, app_state.console)
+    if expert_keyword == "KNOWLEDGE": return get_config_value("model_knowledge", app_state.RUNTIME_OVERRIDES, app_state.console)
+    return get_config_value("model", app_state.RUNTIME_OVERRIDES, app_state.console) # DEFAULT or ROUTING_SELF

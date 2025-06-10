@@ -9,7 +9,7 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.text import Text
 from src.tool_defs import tools # Import the tools definition
-from src.config_utils import get_model_test_expectations, MODEL_CONFIGURATIONS, DEFAULT_LITELLM_MODEL, get_config_value, SHOW_TEST_INFERENCE_NOTES_ERRORS_COLUMN
+from src.config_utils import get_model_test_expectations, MODEL_CONFIGURATIONS, get_config_value, SHOW_TEST_INFERENCE_NOTES_ERRORS_COLUMN
 if TYPE_CHECKING:
     from src.app_state import AppState
 
@@ -62,7 +62,7 @@ def test_inference_endpoint(app_state: 'AppState', specific_model_name: Optional
     else:
         # Test all models defined in MODEL_CONFIGURATIONS and the default model
         models_to_test = list(MODEL_CONFIGURATIONS.keys())
-        default_model_from_config = get_config_value("model", DEFAULT_LITELLM_MODEL, app_state.RUNTIME_OVERRIDES, app_state.console)
+        default_model_from_config = get_config_value("model", app_state.RUNTIME_OVERRIDES, app_state.console)
         if default_model_from_config not in models_to_test:
             models_to_test.append(default_model_from_config)
 
@@ -93,7 +93,7 @@ def test_inference_endpoint(app_state: 'AppState', specific_model_name: Optional
 
         model_expectations = get_model_test_expectations(model_name_to_test)
         api_base_from_model_config = model_expectations.get("api_base")
-        globally_configured_api_base = get_config_value("api_base", None, app_state.RUNTIME_OVERRIDES, app_state.console)
+        globally_configured_api_base = get_config_value("api_base", app_state.RUNTIME_OVERRIDES, app_state.console)
 
         api_base_for_call: Optional[str]
         if api_base_from_model_config is not None:

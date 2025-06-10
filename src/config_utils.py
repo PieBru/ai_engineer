@@ -2,31 +2,39 @@
 import os
 from pathlib import Path
 from typing import Dict, Any, Union, Tuple, Optional
+import toml # Added for TOML parsing
 from dotenv import load_dotenv
 
-# Default LiteLLM configuration values - LITELLM_MODEL serves as LITELLM_MODEL_DEFAULT
-DEFAULT_OLLAMA_API_BASE = "http://localhost:11434"
-DEFAULT_LM_STUDIO_API_BASE = "http://localhost:1234/v1"
-DEFAULT_LITELLM_MAX_TOKENS_ROUTING = 150 # New default for routing max_tokens
-DEFAULT_LITELLM_MAX_TOKENS = 4096  # Example, adjust as needed
-DEFAULT_LITELLM_MAX_TOKENS = 32768  # For models which context window size is unknown
+# --- Ultimate Fallback Defaults ---
+# These are used if config.toml is missing or a key is not found,
+# and no environment variable or runtime override is set.
+ULTIMATE_DEFAULTS = {
+    "api_base_ollama": "http://localhost:11434",
+    "api_base_lm_studio": "http://localhost:1234/v1",
+    "model": "ollama_chat/mistral-small",
+    "model_routing": "ollama_chat/gemma3:1b-it-qat",
+    "model_tools": "ollama_chat/mistral-small", # Placeholder, will use 'model' if not in TOML
+    "model_coding": "ollama_chat/devstral",
+    "model_knowledge": "ollama_chat/mistral-small", # Placeholder
+    "model_summarize": "ollama_chat/mistral-small", # Placeholder
+    "model_planner": "ollama_chat/mistral-small", # Placeholder
+    "model_task_manager": "ollama_chat/mistral-small", # Placeholder
+    "model_rule_enhancer": "ollama_chat/mistral-small", # Placeholder
+    "model_prompt_enhancer": "ollama_chat/mistral-small", # Placeholder
+    "model_workflow_manager": "ollama_chat/mistral-small", # Placeholder
+    "max_tokens": 32768,
+    "max_tokens_routing": 150,
+    "reasoning_effort": "medium",
+    "reasoning_style": "full",
+    "temperature": 0.6, # Added a default for temperature
+}
 
-# Defaults for specialized models. Users should override these via .env for optimal use.
-DEFAULT_LITELLM_MODEL =                  "ollama_chat/mistral-small"
-DEFAULT_LITELLM_MODEL_ROUTING =          "ollama_chat/gemma3:1b-it-qat" # Often a smaller, faster model
-DEFAULT_LITELLM_MODEL_TOOLS =            DEFAULT_LITELLM_MODEL # A good tool calls handler
-DEFAULT_LITELLM_MODEL_CODING =           "ollama_chat/devstral" # Specialized coding model, also "deepseek/deepseek-reasoner" (SOTA 2025, slower, more expensive)
-DEFAULT_LITELLM_MODEL_KNOWLEDGE =        DEFAULT_LITELLM_MODEL # For general knowledge
-DEFAULT_LITELLM_MODEL_SUMMARIZE =        DEFAULT_LITELLM_MODEL # For text summarization
-DEFAULT_LITELLM_MODEL_PLANNER =          DEFAULT_LITELLM_MODEL # For planning complex tasks
-DEFAULT_LITELLM_MODEL_TASK_MANAGER =     DEFAULT_LITELLM_MODEL # For breaking down tasks
-DEFAULT_LITELLM_MODEL_RULE_ENHANCER =    DEFAULT_LITELLM_MODEL # For refining rules/prompts
-DEFAULT_LITELLM_MODEL_PROMPT_ENHANCER =  DEFAULT_LITELLM_MODEL # For enhancing user prompts
-DEFAULT_LITELLM_MODEL_WORKFLOW_MANAGER = DEFAULT_LITELLM_MODEL # For managing multi-step workflows
+# This dictionary will hold configurations loaded from config.toml
+_CONFIG_FROM_TOML: Dict[str, Any] = {}
 
-# Default UI and Reasoning configuration values
-DEFAULT_REASONING_EFFORT = "medium"  # Possible values: "low", "medium", "high"
-DEFAULT_REASONING_STYLE = "full"     # Possible values: "full", "compact", "silent"
+# Python-defined constants (could also be moved to TOML if desired later)
+DEFAULT_REASONING_EFFORT_PY = "medium"  # Possible values: "low", "medium", "high"
+DEFAULT_REASONING_STYLE_PY = "full"     # Possible values: "full", "compact", "silent"
 
 # Configuration for the --test-inference summary table
 SHOW_TEST_INFERENCE_NOTES_ERRORS_COLUMN = False # Set to False to hide the "Notes/Errors" column
@@ -53,6 +61,8 @@ MODEL_CONFIGURATIONS: Dict[str, Dict[str, Any]] = {
     #     "is_thinking_model": True,
     #     "thinking_type": "qwen",
     #     "api_base": None # Example: "http://my-specific-ollama:11434" or None to use default
+    #     "api_base_provider_key": "ollama" # New way to link to TOML api_bases
+
     # },
 
     # To do
@@ -74,124 +84,124 @@ MODEL_CONFIGURATIONS: Dict[str, Dict[str, Any]] = {
         "context_window": 32768,
         "supports_tools": True,
         "is_thinking_model": False,
-        "api_base": DEFAULT_OLLAMA_API_BASE
+        "api_base_provider_key": "ollama"
     },
     "ollama_chat/devstral": {  # https://ollama.com/library/devstral
         "context_window": 131072,
         "supports_tools": False,
         "is_thinking_model": False,
-        "api_base": DEFAULT_OLLAMA_API_BASE
+        "api_base_provider_key": "ollama"
     },
     "ollama_chat/deepcoder:14b-preview-q8_0": {  # https://www.together.ai/blog/deepcoder
         "context_window": 65536,
         "supports_tools": True,
         "is_thinking_model": True,
         "thinking_type": "qwen",
-        "api_base": DEFAULT_OLLAMA_API_BASE
+        "api_base_provider_key": "ollama"
     },
    "ollama_chat/qwen2.5-coder:3b": {
         "context_window": 32768,
         "supports_tools": False,
         "is_thinking_model": False,
-        "api_base": DEFAULT_OLLAMA_API_BASE
+        "api_base_provider_key": "ollama"
     },
    "ollama_chat/qwen2.5-coder:7b": {
         "context_window": 131072,
         "supports_tools": False,
         "is_thinking_model": False,
-        "api_base": DEFAULT_OLLAMA_API_BASE
+        "api_base_provider_key": "ollama"
     },
    "ollama_chat/qwen2.5-coder:14b": {
         "context_window": 131072,
         "supports_tools": False,
         "is_thinking_model": False,
-        "api_base": DEFAULT_OLLAMA_API_BASE
+        "api_base_provider_key": "ollama"
     },
    "ollama_chat/qwen2.5-coder:32b": {  # https://qwenlm.github.io/blog/qwen2.5-coder-family/
         "context_window": 131072,
         "supports_tools": False,
         "is_thinking_model": False,
-        "api_base": DEFAULT_OLLAMA_API_BASE
+        "api_base_provider_key": "ollama"
     },
     "ollama_chat/qwen3:0.6b": {
         "context_window": 40000,
         "supports_tools": False,
         "is_thinking_model": True,
         "thinking_type": "qwen",  # Use <think> ... </think>
-        "api_base": DEFAULT_OLLAMA_API_BASE
+        "api_base_provider_key": "ollama"
     },
     "ollama_chat/qwen3:1.7b": {
         "context_window": 40000,
         "supports_tools": True,
         "is_thinking_model": True,
         "thinking_type": "qwen",  # Use <think> ... </think>
-        "api_base": DEFAULT_OLLAMA_API_BASE
+        "api_base_provider_key": "ollama"
     },
     "ollama_chat/qwen3:4b": {
         "context_window": 40000,
         "supports_tools": True,
         "is_thinking_model": True,
         "thinking_type": "qwen",  # Use <think> ... </think>
-        "api_base": DEFAULT_OLLAMA_API_BASE
+        "api_base_provider_key": "ollama"
     },
     "ollama_chat/qwen3:8b": {
         "context_window": 40000,
         "supports_tools": True,
         "is_thinking_model": True,
         "thinking_type": "qwen",  # Use <think> ... </think>
-        "api_base": DEFAULT_OLLAMA_API_BASE
+        "api_base_provider_key": "ollama"
     },
     "ollama_chat/qwen3:14b": {
         "context_window": 40000,
         "supports_tools": True,
         "is_thinking_model": True,
         "thinking_type": "qwen",  # Use <think> ... </think>
-        "api_base": DEFAULT_OLLAMA_API_BASE
+        "api_base_provider_key": "ollama"
     },
     "ollama_chat/qwen3:30b": {
         "context_window": 40000,
         "supports_tools": False,
         "is_thinking_model": True,
         "thinking_type": "qwen",  # Use <think> ... </think>
-        "api_base": DEFAULT_OLLAMA_API_BASE
+        "api_base_provider_key": "ollama"
     },
     "ollama_chat/qwen3:32b": {
         "context_window": 40000,
         "supports_tools": True,
         "is_thinking_model": True,
         "thinking_type": "qwen",  # Use <think> ... </think>
-        "api_base": DEFAULT_OLLAMA_API_BASE
+        "api_base_provider_key": "ollama"
     },
     "ollama_chat/gemma3:1b-it-qat": {
         "context_window": 128000,
         "supports_tools": False,
         "is_thinking_model": False,
-        "api_base": DEFAULT_OLLAMA_API_BASE
+        "api_base_provider_key": "ollama"
     },
     "ollama_chat/gemma3:4b-it-qat": {
         "context_window": 128000,
         "supports_tools": False,
         "is_thinking_model": False,
-        "api_base": DEFAULT_OLLAMA_API_BASE
+        "api_base_provider_key": "ollama"
     },
     "ollama_chat/gemma3:12b-it-qat": {
         "context_window": 128000,
         "supports_tools": False,
         "is_thinking_model": False,
-        "api_base": DEFAULT_OLLAMA_API_BASE
+        "api_base_provider_key": "ollama"
     },
     "ollama_chat/gemma3:27b-it-qat": {
         "context_window": 128000,
         "supports_tools": False,
         "is_thinking_model": False,
-        "api_base": DEFAULT_OLLAMA_API_BASE
+        "api_base_provider_key": "ollama"
     },
     "ollama_chat/qwq": {
         "context_window": 131072,
         "supports_tools": True,
         "is_thinking_model": True,
         "thinking_type": "qwen",
-        "api_base": DEFAULT_OLLAMA_API_BASE # Or "http://specific-ollama-server:11434"
+        "api_base_provider_key": "ollama"
     },
 
     "lm_studio/deepseek-r1-0528-qwen3-8b@q8_0": {
@@ -199,7 +209,7 @@ MODEL_CONFIGURATIONS: Dict[str, Dict[str, Any]] = {
         "supports_tools": False,
         "is_thinking_model": True,
         "thinking_type": "qwen",
-        "api_base": DEFAULT_LM_STUDIO_API_BASE
+        "api_base_provider_key": "lm_studio"
     },
 
     #"deepseek/deepseek-chat": {
@@ -377,9 +387,47 @@ def list_runtime_overrides(runtime_overrides: Dict[str, Any], console_obj):
 
 def load_configuration(console_obj):
     """
-    Loads .env file into environment variables.
+    Loads .env file into environment variables and config.toml into _CONFIG_FROM_TOML.
+    Then, updates MODEL_CONFIGURATIONS with API bases from TOML.
     """
     load_dotenv()
+    global _CONFIG_FROM_TOML, MODEL_CONFIGURATIONS
+
+    try:
+        toml_config_path = Path("config.toml")
+        if toml_config_path.exists():
+            loaded_toml = toml.load(toml_config_path)
+            
+            # Flatten TOML structure into _CONFIG_FROM_TOML for easier access
+            # e.g., models.default becomes "model" (matching SUPPORTED_SET_PARAMS keys)
+            # e.g., api_bases.ollama becomes "api_base_ollama"
+            if "api_bases" in loaded_toml and isinstance(loaded_toml["api_bases"], dict):
+                for key, value in loaded_toml["api_bases"].items():
+                    _CONFIG_FROM_TOML[f"api_base_{key}"] = value
+            
+            if "models" in loaded_toml and isinstance(loaded_toml["models"], dict):
+                for key, value in loaded_toml["models"].items():
+                    # Map TOML model keys to SUPPORTED_SET_PARAMS keys
+                    # 'default' -> 'model', 'routing' -> 'model_routing', etc.
+                    param_key = f"model_{key}" if key != "default" else "model"
+                    _CONFIG_FROM_TOML[param_key] = value
+
+            if "tokens" in loaded_toml and isinstance(loaded_toml["tokens"], dict):
+                _CONFIG_FROM_TOML["max_tokens"] = loaded_toml["tokens"].get("default_max")
+                _CONFIG_FROM_TOML["max_tokens_routing"] = loaded_toml["tokens"].get("routing_max")
+
+            if "reasoning" in loaded_toml and isinstance(loaded_toml["reasoning"], dict):
+                _CONFIG_FROM_TOML["reasoning_effort"] = loaded_toml["reasoning"].get("effort")
+                _CONFIG_FROM_TOML["reasoning_style"] = loaded_toml["reasoning"].get("style")
+
+            # Dynamically update api_base in MODEL_CONFIGURATIONS
+            for model_name, model_cfg in MODEL_CONFIGURATIONS.items():
+                provider_key = model_cfg.get("api_base_provider_key")
+                if provider_key:
+                    model_cfg["api_base"] = _CONFIG_FROM_TOML.get(f"api_base_{provider_key}", ULTIMATE_DEFAULTS.get(f"api_base_{provider_key}"))
+    except Exception as e:
+        if console_obj:
+            console_obj.print(f"[yellow]Warning: Could not load or parse config.toml: {e}. Using internal defaults.[/yellow]")
 
 def get_model_test_expectations(model_name: str) -> Dict[str, Any]:
     """
@@ -412,11 +460,12 @@ def get_model_test_expectations(model_name: str) -> Dict[str, Any]:
     # If no match, return a copy of defaults
     config = DEFAULT_MODEL_TEST_EXPECTATIONS.copy()
     # Apply provider-default API base if model_name gives a hint and api_base is still None
-    if config.get("api_base") is None:
+    # This logic is now mostly handled by MODEL_CONFIGURATIONS' api_base_provider_key and load_configuration
+    if config.get("api_base") is None and config.get("api_base_provider_key") is None:
         if model_name.startswith("ollama_chat/"):
-            config["api_base"] = DEFAULT_OLLAMA_API_BASE
+            config["api_base"] = _CONFIG_FROM_TOML.get("api_base_ollama", ULTIMATE_DEFAULTS["api_base_ollama"])
         elif model_name.startswith("lm_studio/"):
-            config["api_base"] = DEFAULT_LM_STUDIO_API_BASE
+            config["api_base"] = _CONFIG_FROM_TOML.get("api_base_lm_studio", ULTIMATE_DEFAULTS["api_base_lm_studio"])
     return config
 
 
@@ -445,61 +494,53 @@ def get_model_context_window(model_name: str, return_match_status: bool = False)
     return context_window
 
 
-def get_config_value(param_name: str, default_value: Any, runtime_overrides: Dict[str, Any], console_obj=None) -> Any:
+def get_config_value(param_name: str, runtime_overrides: Dict[str, Any], console_obj=None) -> Any:
     """
     Retrieves a configuration value based on precedence:
     1. Runtime overrides
     2. Environment variables
-    4. Provided default value
+    3. Values from config.toml (_CONFIG_FROM_TOML)
+    4. Ultimate hardcoded defaults (ULTIMATE_DEFAULTS)
     """
-    # Ensure param_name is valid before proceeding (RUNTIME_OVERRIDES is now passed in)
     if param_name not in SUPPORTED_SET_PARAMS:
-        # This case should ideally not be reached if callers use valid param_names
         if console_obj:
             console_obj.print(f"[yellow]Warning: Attempted to get unknown config param '{param_name}'. Using default.[/yellow]")
-        return default_value
+        return ULTIMATE_DEFAULTS.get(param_name) # Or raise error
         
     p_config = SUPPORTED_SET_PARAMS[param_name]
     runtime_val = runtime_overrides.get(param_name)
+
     if runtime_val is not None:
         if param_name == "max_tokens": return int(runtime_val) if isinstance(runtime_val, str) and runtime_val.isdigit() else runtime_val
         if param_name == "max_tokens_routing": return int(runtime_val) if isinstance(runtime_val, str) and runtime_val.isdigit() else runtime_val
         if param_name == "temperature": return float(runtime_val) if isinstance(runtime_val, (str, int, float)) else runtime_val # Allow int for temp
         return runtime_val
-    
+
     env_var_name = p_config.get("env_var")
     env_val = None
     if env_var_name:
         env_val = os.getenv(env_var_name)
 
     if env_val is not None:
-        if param_name == "max_tokens": return int(env_val) if env_val.isdigit() else default_value
-        if param_name == "max_tokens_routing": return int(env_val) if env_val.isdigit() else default_value
+        # Use ultimate default as fallback for type conversion errors from env var
+        ultimate_fallback = _CONFIG_FROM_TOML.get(param_name, ULTIMATE_DEFAULTS.get(param_name))
+        if param_name == "max_tokens": return int(env_val) if env_val.isdigit() else ultimate_fallback
+        if param_name == "max_tokens_routing": return int(env_val) if env_val.isdigit() else ultimate_fallback
         if param_name == "temperature":
             try: return float(env_val)
-            except ValueError: return default_value
+            except ValueError: return ultimate_fallback
         if "allowed_values" in p_config and env_val.lower() in p_config["allowed_values"]:
             return env_val.lower()
         elif "allowed_values" not in p_config: 
              return env_val
-    
-    return default_value
 
-# For backward compatibility with MODEL_CONTEXT_WINDOWS direct access if any part of the code still uses it.
-# However, new logic should prefer get_model_test_expectations or get_model_context_window.
-MODEL_CONTEXT_WINDOWS: Dict[str, int] = {
-    k: v.get("context_window", DEFAULT_MODEL_TEST_EXPECTATIONS["context_window"]) 
-    for k, v in MODEL_CONFIGURATIONS.items()
-}
-MODEL_CONTEXT_WINDOWS.update({ # Add defaults for role-based models if not explicitly in MODEL_CONFIGURATIONS
-    DEFAULT_LITELLM_MODEL_ROUTING: get_model_test_expectations(DEFAULT_LITELLM_MODEL_ROUTING)["context_window"],
-    DEFAULT_LITELLM_MODEL_TOOLS: get_model_test_expectations(DEFAULT_LITELLM_MODEL_TOOLS)["context_window"],
-    DEFAULT_LITELLM_MODEL_CODING: get_model_test_expectations(DEFAULT_LITELLM_MODEL_CODING)["context_window"],
-    DEFAULT_LITELLM_MODEL_KNOWLEDGE: get_model_test_expectations(DEFAULT_LITELLM_MODEL_KNOWLEDGE)["context_window"],
-    DEFAULT_LITELLM_MODEL_SUMMARIZE: get_model_test_expectations(DEFAULT_LITELLM_MODEL_SUMMARIZE)["context_window"],
-    DEFAULT_LITELLM_MODEL_PLANNER: get_model_test_expectations(DEFAULT_LITELLM_MODEL_PLANNER)["context_window"],
-    DEFAULT_LITELLM_MODEL_TASK_MANAGER: get_model_test_expectations(DEFAULT_LITELLM_MODEL_TASK_MANAGER)["context_window"],
-    DEFAULT_LITELLM_MODEL_RULE_ENHANCER: get_model_test_expectations(DEFAULT_LITELLM_MODEL_RULE_ENHANCER)["context_window"],
-    DEFAULT_LITELLM_MODEL_PROMPT_ENHANCER: get_model_test_expectations(DEFAULT_LITELLM_MODEL_PROMPT_ENHANCER)["context_window"],
-    DEFAULT_LITELLM_MODEL_WORKFLOW_MANAGER: get_model_test_expectations(DEFAULT_LITELLM_MODEL_WORKFLOW_MANAGER)["context_window"],
-})
+    # Fallback to TOML config, then to ultimate defaults
+    # For specialized models, if not in TOML, use the 'model' (default model) value
+    if param_name.startswith("model_") and param_name != "model_routing": # e.g. model_coding, model_tools
+        toml_val = _CONFIG_FROM_TOML.get(param_name)
+        if toml_val is not None:
+            return toml_val
+        # Fallback to the general 'model' value from TOML or ultimate defaults
+        return _CONFIG_FROM_TOML.get("model", ULTIMATE_DEFAULTS.get("model"))
+
+    return _CONFIG_FROM_TOML.get(param_name, ULTIMATE_DEFAULTS.get(param_name))

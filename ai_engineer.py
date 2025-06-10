@@ -15,30 +15,11 @@ Original source: https://github.com/PieBru/ai_engineer
 # or handle missing ones (like Rich) for the check itself.
 from src import startup_checks
 startup_checks.perform_venv_check() # This will exit if not in a venv
-
 import os
 import sys
 import argparse
 import time
 from pathlib import Path
-
-# Import default constants from config_utils first
-from src.config_utils import (
-    DEFAULT_LITELLM_MODEL,
-    DEFAULT_LITELLM_MAX_TOKENS,
-    DEFAULT_LITELLM_MODEL_ROUTING,
-    DEFAULT_LITELLM_MODEL_TOOLS,
-    DEFAULT_LITELLM_MODEL_CODING,
-    DEFAULT_LITELLM_MODEL_SUMMARIZE,
-    DEFAULT_LITELLM_MODEL_KNOWLEDGE,
-    DEFAULT_LITELLM_MODEL_PLANNER,
-    DEFAULT_LITELLM_MODEL_TASK_MANAGER,
-    DEFAULT_LITELLM_MODEL_RULE_ENHANCER,
-    DEFAULT_LITELLM_MODEL_PROMPT_ENHANCER,
-    DEFAULT_LITELLM_MODEL_WORKFLOW_MANAGER,
-    DEFAULT_REASONING_EFFORT,
-    DEFAULT_REASONING_STYLE
-)
 
 # Import application state and new modules
 from src.app_state import AppState
@@ -91,7 +72,7 @@ def get_context_usage_prompt_string(app_state: AppState) -> str:
 
     if messages_for_count: # Only proceed if there's something to count (system prompt or history)
         try:
-            active_model_for_prompt_context = get_config_value("model", DEFAULT_LITELLM_MODEL, app_state.RUNTIME_OVERRIDES, app_state.console)
+            active_model_for_prompt_context = get_config_value("model", app_state.RUNTIME_OVERRIDES, app_state.console)
             context_window_size_prompt, used_default_prompt = get_model_context_window(active_model_for_prompt_context, return_match_status=True)
 
             if active_model_for_prompt_context: # Ensure model name is available
@@ -153,7 +134,7 @@ def execute_script_line(line: str, app_state: AppState):
             return # Command was handled
 
     # If not a known command, treat as a prompt for the LLM
-    target_model_for_script_line = get_config_value("model", DEFAULT_LITELLM_MODEL, app_state.RUNTIME_OVERRIDES, app_state.console)
+    target_model_for_script_line = get_config_value("model", app_state.RUNTIME_OVERRIDES, app_state.console)
     is_script_command = line.startswith("/") # Re-check, though most /commands are handled above
 
     if line and not is_script_command:
@@ -251,7 +232,7 @@ def main():
 
 
         # --- Routing Step for non-commands ---
-        target_model_for_this_turn = get_config_value("model", DEFAULT_LITELLM_MODEL, app_state.RUNTIME_OVERRIDES, app_state.console)
+        target_model_for_this_turn = get_config_value("model", app_state.RUNTIME_OVERRIDES, app_state.console)
 
         app_state.console.print("[dim]↪ Routing query...[/dim]")
 

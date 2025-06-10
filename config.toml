@@ -1,0 +1,34 @@
+# Default configuration for AI Engineer
+# These values can be overridden by environment variables or runtime /set commands.
+
+[api_bases]
+ollama = "http://localhost:11434"
+lm_studio = "http://localhost:1234/v1"
+
+[models]
+default = "ollama_chat/mistral-small"
+routing = "ollama_chat/gemma3:1b-it-qat"
+# For other specialized models, if not specified, they will use the 'default' model value
+# from the [models.default] key above when accessed via get_config_value.
+# You can explicitly set them here if you want different base defaults:
+# tools = "ollama_chat/mistral-small"
+# coding = "ollama_chat/devstral"
+# knowledge = "ollama_chat/mistral-small"
+# summarize = "ollama_chat/mistral-small"
+# planner = "ollama_chat/mistral-small"
+# task_manager = "ollama_chat/mistral-small"
+# rule_enhancer = "ollama_chat/mistral-small"
+# prompt_enhancer = "ollama_chat/mistral-small"
+# workflow_manager = "ollama_chat/mistral-small"
+
+[tokens]
+default_max = 32768 # For models with unknown context window or general use
+routing_max = 150
+
+[reasoning]
+effort = "medium" # Options: "low", "medium", "high"
+style = "full"    # Options: "full", "compact", "silent"
+
+# The following internal limits and test settings are currently managed in config_utils.py
+# but could be moved here in the future if desired.
+# [internal_limits], [test_inference_settings]

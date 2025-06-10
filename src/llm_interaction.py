@@ -14,9 +14,7 @@ from litellm import completion
 
 from src.tool_defs import tools, RISKY_TOOLS
 from src.config_utils import (
-    get_config_value, DEFAULT_LITELLM_MODEL, DEFAULT_LM_STUDIO_API_BASE,
-    get_model_test_expectations, # Import for getting model-specific API base
-    DEFAULT_REASONING_STYLE, DEFAULT_LITELLM_MAX_TOKENS, DEFAULT_REASONING_EFFORT,
+    get_config_value, get_model_test_expectations,
     MAX_FILE_SIZE_BYTES
 )
 from src.file_utils import ( # type: ignore
@@ -171,7 +169,7 @@ def stream_llm_response(
             model_name = target_model_override
             app_state.console.print(f"[dim]🧠 Using routed model: [bold magenta]{model_name}[/bold magenta][/dim]")
         else:
-            model_name = get_config_value("model", DEFAULT_LITELLM_MODEL, app_state.RUNTIME_OVERRIDES, app_state.console)
+            model_name = get_config_value("model", app_state.RUNTIME_OVERRIDES, app_state.console)
         
         # Determine the API base for this specific model_name
         # 1. Check model-specific configuration (MODEL_CONFIGURATIONS or ollama/lm_studio defaults via get_model_test_expectations)
@@ -179,8 +177,7 @@ def stream_llm_response(
         api_base_from_model_config = model_expectations.get("api_base")
 
         # 2. Check for a globally configured API base (e.g., LITELLM_API_BASE env var or /set api_base)
-        #    If LITELLM_API_BASE env var is not set and no runtime override, this will be None.
-        globally_configured_api_base = get_config_value("api_base", None, app_state.RUNTIME_OVERRIDES, app_state.console) # Pass None as default to see if it's truly set
+        globally_configured_api_base = get_config_value("api_base", app_state.RUNTIME_OVERRIDES, app_state.console)
 
         api_base_url: Optional[str] # Explicitly typed
         if api_base_from_model_config is not None:
@@ -197,23 +194,24 @@ def stream_llm_response(
             # This implies a direct provider call using API keys, so api_base should be None.
             api_base_url = None
 
-        reasoning_style = str(get_config_value("reasoning_style", DEFAULT_REASONING_STYLE, app_state.RUNTIME_OVERRIDES, app_state.console)).lower()
-        max_tokens_raw = get_config_value("max_tokens", DEFAULT_LITELLM_MAX_TOKENS, app_state.RUNTIME_OVERRIDES, app_state.console)
+        reasoning_style = str(get_config_value("reasoning_style", app_state.RUNTIME_OVERRIDES, app_state.console)).lower()
+        max_tokens_raw = get_config_value("max_tokens", app_state.RUNTIME_OVERRIDES, app_state.console)
         try:
             max_tokens = int(max_tokens_raw)
-            if max_tokens <= 0: max_tokens = DEFAULT_LITELLM_MAX_TOKENS # Fallback
+            if max_tokens <= 0: max_tokens = get_config_value("max_tokens", {}, app_state.console) # Fallback to ultimate default
         except (ValueError, TypeError):
-            max_tokens = DEFAULT_LITELLM_MAX_TOKENS
+            max_tokens = get_config_value("max_tokens", {}, app_state.console) # Fallback
 
-        temperature_raw = get_config_value("temperature", default_temperature_val, app_state.RUNTIME_OVERRIDES, app_state.console)
+        temperature_raw = get_config_value("temperature", app_state.RUNTIME_OVERRIDES, app_state.console)
         try:
             temperature = float(temperature_raw)
         except (ValueError, TypeError):
             app_state.console.print(f"[yellow]Warning: Invalid temperature value '{temperature_raw}'. Using default {default_temperature_val}.[/yellow]")
             temperature = default_temperature_val
 
-        reasoning_effort_setting = str(get_config_value("reasoning_effort", DEFAULT_REASONING_EFFORT, app_state.RUNTIME_OVERRIDES, app_state.console)).lower()
-        reply_effort_setting = str(get_config_value("reply_effort", default_reply_effort_val, app_state.RUNTIME_OVERRIDES, app_state.console)).lower()
+        reasoning_effort_setting = str(get_config_value("reasoning_effort", app_state.RUNTIME_OVERRIDES, app_state.console)).lower()
+        # Assuming 'reply_effort' would also use get_config_value if it were a formal config
+        reply_effort_setting = str(get_config_value("reply_effort", app_state.RUNTIME_OVERRIDES, app_state.console) or default_reply_effort_val).lower()
 
         effort_instructions = (
             f"\n\n[System Instructions For This Turn Only]:\n"
