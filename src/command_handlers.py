@@ -6,6 +6,7 @@ if TYPE_CHECKING:
 
 # Import individual command handlers
 from src.commands.add_command import try_handle_add_command
+from src.commands.show_command import try_handle_show_command # Import the new handler
 from src.commands.set_command import try_handle_set_command
 from src.commands.help_command import try_handle_help_command
 from src.commands.shell_command import try_handle_shell_command

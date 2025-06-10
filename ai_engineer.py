@@ -54,10 +54,11 @@ from src import rules_manager # New import for rules system
 from src.llm_interaction import stream_llm_response
 from src.prompts import RichMarkdown # If RichMarkdown is used directly for help panel
 
-# Import Rich components
-from rich.panel import Panel
+# Import Rich components (Panel moved to ui_display)
 from rich.console import Console # For specific stderr prints if needed
 
+# Import the new UI display module
+from src.ui_display import display_welcome_panel
 # LiteLLM specific imports
 from litellm import token_counter
 import litellm
@@ -72,40 +73,6 @@ litellm.suppress_debug_info = True
 import logging
 logging.getLogger("litellm").setLevel(logging.WARNING)
 
-
-def display_welcome_panel(app_state: AppState):
-    """Displays the welcome panel."""
-    current_model_name_for_display = get_config_value("model", DEFAULT_LITELLM_MODEL, app_state.RUNTIME_OVERRIDES, app_state.console)
-    context_window_size_display, used_default_display = get_model_context_window(current_model_name_for_display, return_match_status=True)
-    context_window_display_str = f"Context:{context_window_size_display // 1024}k tokens"
-    current_working_directory = os.getcwd()
-    if used_default_display:
-        context_window_display_str += " (default)"
-
-    instructions = f"""  📁 [bold bright_blue]Current Directory: [/bold bright_blue][bold green]{current_working_directory}[/bold green]
-
-  🧠 [bold bright_blue]Default Model: [/bold bright_blue][bold magenta]{current_model_name_for_display}[/bold magenta] ([dim]{context_window_display_str}[/dim])
-     Routing: [dim]{get_config_value("model_routing", DEFAULT_LITELLM_MODEL_ROUTING, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim] | Tools: [dim]{get_config_value("model_tools", DEFAULT_LITELLM_MODEL_TOOLS, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim]
-     Coding: [dim]{get_config_value("model_coding", DEFAULT_LITELLM_MODEL_CODING, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim] | Knowledge: [dim]{get_config_value("model_knowledge", DEFAULT_LITELLM_MODEL_KNOWLEDGE, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim]
-     Summarize: [dim]{get_config_value("model_summarize", DEFAULT_LITELLM_MODEL_SUMMARIZE, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim] | Planner: [dim]{get_config_value("model_planner", DEFAULT_LITELLM_MODEL_PLANNER, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim]
-     Task Mgr: [dim]{get_config_value("model_task_manager", DEFAULT_LITELLM_MODEL_TASK_MANAGER, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim] | Rule Enh: [dim]{get_config_value("model_rule_enhancer", DEFAULT_LITELLM_MODEL_RULE_ENHANCER, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim]
-     Prompt Enh: [dim]{get_config_value("model_prompt_enhancer", DEFAULT_LITELLM_MODEL_PROMPT_ENHANCER, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim] | Workflow Mgr: [dim]{get_config_value("model_workflow_manager", DEFAULT_LITELLM_MODEL_WORKFLOW_MANAGER, app_state.RUNTIME_OVERRIDES) or 'Not Set'}[/dim]
-
-  ❓ [bold bright_blue]/help[/bold bright_blue] - Documentation runtime entry point.
-
-  🌐 [bold bright_blue]Online project resources:[/bold bright_blue]
-     • Official Github Repository: https://github.com/PieBru/ai_engineer
-
-  👥 [bold white]Just ask naturally, like you are explaining to a Software Engineer.[/bold white]"""
-
-    app_state.console.print(Panel(
-        instructions,
-        border_style="blue",
-        padding=(1, 2),
-        title="[bold blue]🎯 Welcome to your Software Engineer AI Assistant[/bold blue]",
-        title_align="left"
-    ))
-    app_state.console.print()
 
 def get_context_usage_prompt_string(app_state: AppState) -> str:
     """
@@ -146,6 +113,7 @@ def get_context_usage_prompt_string(app_state: AppState) -> str:
 # --- Command Handler Registries ---
 MAIN_LOOP_COMMAND_HANDLERS = [
     command_handlers.try_handle_add_command,
+    command_handlers.try_handle_show_command, # New handler for /show
     command_handlers.try_handle_set_command,
     command_handlers.try_handle_help_command,
     command_handlers.try_handle_shell_command,
@@ -162,6 +130,7 @@ MAIN_LOOP_COMMAND_HANDLERS = [
 
 SCRIPT_EXECUTION_COMMAND_HANDLERS = [
     command_handlers.try_handle_add_command,
+    command_handlers.try_handle_show_command, # Also useful in scripts
     command_handlers.try_handle_set_command,
     command_handlers.try_handle_help_command,
     command_handlers.try_handle_shell_command,
