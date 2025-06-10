@@ -1,0 +1,331 @@
+'''
+Gemini
+======
+
+Okay, this is an interesting challenge! To show these context stats, your "AI Engineer runtime" would need to integrate information from its own configuration (for the LLM's context window) and interact with an active KVzip instance (for KVzip-specific stats).
+
+Here's a suggested approach:
+
+The Command: You could add a command like this to your AI Engineer runtime, potentially as a flag to your poc_KVzip.py script:
+
+bash
+python poc_KVzip.py --show-context-stats
+Or, if your AI Engineer runtime is an interactive shell:
+
+plaintext
+context --stats
+How it Would Work (poc_KVzip.py or similar script): The script (poc_KVzip.py or a dedicated stats script) would need to:
+
+Access the AI Engineer's configuration (e.g., LITELLM_MODEL environment variable) to determine the main LLM and its context window using your config_utils.py.
+Access the KVZIP_MODEL environment variable for the model KVzip is using.
+If KVzip is active and a context has been prefilled and potentially pruned by poc_KVzip.py, the script would use the existing ModelKVzip instance and its kv_cache object to report on its state.
+If no KVzip context is active (e.g., --show-context-stats is run standalone), it could optionally initialize KVzip with a sample context to show potential stats, or simply report KVzip as inactive. For accurate "current state" reporting, it's best if this is called when kv_cache is already populated by the main script's operations.
+Python Logic for Displaying Stats: Below is a Python function that encapsulates the logic. You'd integrate this into poc_KVzip.py or a script that your AI Engineer runtime command calls. This function assumes it can access (or initialize for demo purposes) the KVzip cache.
+'''
+
+# This code would typically be part of your poc_KVzip.py or a utility module
+# accessible by your AI Engineer runtime.
+
+import os
+import sys
+from pathlib import Path
+from typing import Optional, Union, Dict, Any
+import argparse # For the --show-context-stats example
+
+# --- Assuming this structure for AI-Engineer project ---
+# AI-Engineer/
+# |-- poc/
+# |   `-- poc_KVzip.py  (or where this stats logic lives)
+# |-- src/
+# |   `-- config_utils.py
+# `-- KVzip/ (cloned KVzip library)
+
+# Add src to sys.path to import config_utils
+current_script_path = Path(__file__).resolve()
+project_root = current_script_path.parent.parent
+src_path = project_root / "src"
+if str(src_path) not in sys.path:
+    sys.path.insert(0, str(src_path))
+
+try:
+    from config_utils import (
+        get_model_context_window, get_config_value,
+        DEFAULT_LITELLM_MODEL, MODEL_CONFIGURATIONS, DEFAULT_MODEL_TEST_EXPECTATIONS,
+        # Assuming runtime_overrides might be a concept in your AI Engineer
+        # For this standalone example, we'll use a placeholder.
+    )
+except ImportError as e:
+    print(f"Error importing from config_utils: {e}\n"
+          "Please ensure config_utils.py is in the src directory and src is in PYTHONPATH or accessible.")
+    sys.exit(1)
+
+# Attempt to import KVzip components
+ModelKVzip = None
+EvictCache = None
+RetainCache = None
+try:
+    # Ensure KVzip is in PYTHONPATH as per your setup
+    # export PYTHONPATH=$PYTHONPATH:/home/piero/Piero/Git/KVzip
+    from KVzip.model import ModelKVzip
+    from KVzip.attention.kvcache import EvictCache, RetainCache
+except ImportError as e:
+    print(f"Warning: Could not import KVzip modules ({e}). KVzip stats will be unavailable.")
+    # The main poc_KVzip.py script already has more robust error handling for this.
+
+# --- Mocked global state for KVzip (in a real app, this would be managed) ---
+# These would be populated by the main logic of poc_KVzip.py if it has
+# already initialized and used KVzip.
+_active_kvzip_model_instance: Optional[ModelKVzip] = None
+_active_kvzip_cache: Optional[Union[EvictCache, RetainCache]] = None
+_active_kvzip_compression_details: Optional[Dict[str, Any]] = None # Store ratio, level
+
+def _ensure_kvzip_initialized_for_stats(
+        kvzip_model_env_key: str,
+        sample_context_text: str,
+        compression_ratio_target: float,
+        compression_level: str
+    ) -> None:
+    """
+    Initializes a temporary KVzip instance with sample data for stats display
+    if no active cache is found. This is for demonstration if stats are called "cold".
+    In an integrated app, you'd query the *actual* active cache.
+    """
+    global _active_kvzip_model_instance, _active_kvzip_cache, _active_kvzip_compression_details
+
+    if not ModelKVzip: # Guard if KVzip couldn't be imported
+        return
+
+    kvzip_model_name = os.getenv(kvzip_model_env_key)
+    if not kvzip_model_name:
+        print(f"[Warning] {kvzip_model_env_key} environment variable not set. Cannot show KVzip stats.")
+        _active_kvzip_cache = None
+        return
+
+    try:
+        print(f"[Stats Display] Initializing KVzip with model '{kvzip_model_name}' and sample context...")
+        # For stats display, 'retain' type is often safer as it doesn't discard data.
+        # The main application might use 'evict'. This shows potential stats.
+        temp_model_kv = ModelKVzip(kvzip_model_name, kv_type="retain")
+
+        # Use a small, fixed portion of the sample context to speed up prefill for stats
+        max_prefill_chars = 5000 
+        context_for_prefill = sample_context_text[:max_prefill_chars]
+
+        print(f"[Stats Display] Prefilling KVzip with {len(context_for_prefill)} chars of sample context...")
+        temp_cache = temp_model_kv.prefill(
+            context_for_prefill, 
+            do_score=(compression_level != "head"), # Score if not head-level
+            load_score=(compression_level == "head") # Load pre-computed if head-level
+        )
+        print("[Stats Display] Prefill complete.")
+
+        _active_kvzip_model_instance = temp_model_kv
+        _active_kvzip_cache = temp_cache
+        _active_kvzip_compression_details = {
+            "ratio_target": 1.0,
+            "ratio_achieved": 1.0,
+            "level": "N/A (No pruning for initial stats)",
+            "pruned": False
+        }
+
+        if temp_cache and compression_ratio_target < 1.0:
+            print(f"[Stats Display] Pruning KV cache (ratio: {compression_ratio_target}, level: '{compression_level}')...")
+            _, real_ratio = temp_cache.prune(ratio=compression_ratio_target, level=compression_level)
+            _active_kvzip_compression_details.update({
+                "ratio_target": compression_ratio_target,
+                "ratio_achieved": real_ratio,
+                "level": compression_level,
+                "pruned": True
+            })
+            print("[Stats Display] Pruning complete.")
+
+    except Exception as e:
+        print(f"[Error] Failed to initialize or prefill KVzip for stats: {e}")
+        _active_kvzip_cache = None # Ensure cache is None on failure
+
+def display_context_stats(
+    llm_model_env_key: str = "LITELLM_MODEL",
+    kvzip_model_env_key: str = "KVZIP_MODEL",
+    # In a real app, these would be passed or accessed from a shared state
+    # For this example, we use the mocked global-like variables
+    # Or initialize if sample_context_for_kvzip is provided
+    kvzip_enabled_by_app: bool = True, 
+    sample_context_for_kvzip: Optional[str] = None,
+    kvzip_compression_ratio_target_for_stats: float = 0.3,
+    kvzip_compression_level_for_stats: str = "pair"
+    ):
+    """
+    Displays context statistics for the LLM and KVzip (if active).
+    """
+    global _active_kvzip_cache, _active_kvzip_compression_details # Refer to the mocked global state
+
+    # --- 1. LLM Context Window ---
+    runtime_overrides_placeholder: Dict[str, Any] = {} # Placeholder for AI Engineer's runtime overrides
+
+    # Determine the default LLM model: use env var if set, else fallback to coded default
+    env_llm_model = os.getenv(llm_model_env_key)
+    actual_default_llm_model = env_llm_model if env_llm_model else DEFAULT_LITELLM_MODEL
+
+    # Get the LLM model name considering runtime overrides and environment variables
+    llm_model_name = get_config_value("model", actual_default_llm_model, runtime_overrides_placeholder)
+
+    # Fetch context window using the determined model name
+    llm_context_window, used_default_llm_config = get_model_context_window(llm_model_name, return_match_status=True)
+
+    print("\nContext Statistics:")
+    print("-------------------")
+    print(f"LLM Model (via {llm_model_env_key}): {llm_model_name}")
+    print(f"LLM Max Context Window: {llm_context_window} tokens" + (" (default)" if used_default_llm_config else ""))
+    print("")
+
+    # --- 2. KVzip Stats ---
+    # Check if KVzip should be considered active
+    kvzip_active_for_stats = kvzip_enabled_by_app and ModelKVzip is not None and os.getenv(kvzip_model_env_key)
+
+    if not kvzip_active_for_stats:
+        print("KVzip Status: Disabled or Not Configured")
+        if not ModelKVzip:
+            print("  (Reason: KVzip library not imported)")
+        elif not os.getenv(kvzip_model_env_key):
+            print(f"  (Reason: {kvzip_model_env_key} environment variable not set)")
+    else:
+        # If no active cache from main app and sample context is given, initialize for stats
+        if not _active_kvzip_cache and sample_context_for_kvzip:
+            _ensure_kvzip_initialized_for_stats(
+                kvzip_model_env_key,
+                sample_context_for_kvzip,
+                kvzip_compression_ratio_target_for_stats,
+                kvzip_compression_level_for_stats
+            )
+
+        if _active_kvzip_cache:
+            print("KVzip Status: Enabled")
+            kvzip_model_name_actual = os.getenv(kvzip_model_env_key, "N/A")
+            print(f"KVzip Model (via {kvzip_model_env_key}): {kvzip_model_name_actual}")
+
+            # Original length of the context segment KVzip is designed to score/compress
+            original_kv_managed_tokens = _active_kvzip_cache.ctx_len 
+            print(f"KVzip-Managed Context Segment (tokens): {original_kv_managed_tokens}")
+
+            # Total tokens processed by the KV cache during prefill
+            if hasattr(_active_kvzip_cache, '_seen_tokens'):
+                total_prefilled_tokens = _active_kvzip_cache._seen_tokens
+                print(f"Total Prefilled Tokens (KVzip cache): {total_prefilled_tokens}")
+
+            kv_cache_size_gb = _active_kvzip_cache._mem()
+            print(f"Current KV Cache Size: {kv_cache_size_gb:.3f} GB")
+
+            if _active_kvzip_compression_details and _active_kvzip_compression_details["pruned"]:
+                print(f"  Target Compression Ratio: {_active_kvzip_compression_details['ratio_target']:.2f}")
+                print(f"  Achieved Compression Ratio: {_active_kvzip_compression_details['ratio_achieved']:.2f}")
+                print(f"  Compression Level: {_active_kvzip_compression_details['level']}")
+            else:
+                print("  Compression: N/A (Cache not pruned or full context retained by KVzip)")
+        else:
+            print("KVzip Status: Enabled but no active cache for detailed stats.")
+            print(f"  (To see detailed KVzip stats, ensure a context is prefilled or provide a sample context for stats display.)")
+
+    print("")
+    # --- 3. Uncompressed Context Size (Placeholder) ---
+    # This would ideally be the sum of tokens from all files/inputs forming the current logical context
+    # before any KVzip processing or LLM truncation.
+    print("Uncompressed Full Context Size (e.g., sum of file tokens): Placeholder (to be implemented by AI Engineer runtime)")
+    print("-------------------\n")
+
+# --- Example of how poc_KVzip.py might use this ---
+if __name__ == "__main__":
+    # This is a simplified argument parser for demonstration.
+    # Your poc_KVzip.py would have its own.
+    parser = argparse.ArgumentParser(description="Show context stats for AI Engineer.")
+    parser.add_argument(
+        "--show-context-stats", 
+        action="store_true", 
+        help="Display context statistics."
+    )
+    parser.add_argument(
+        "--kvzip-enabled", 
+        action=argparse.BooleanOptionalAction, # Allows --kvzip-enabled / --no-kvzip-enabled
+        default=True, # Default to true if KVZIP_MODEL is set, otherwise false
+        help="Specify if KVzip is considered enabled for stats display."
+    )
+    parser.add_argument(
+        "--sample-context-file", 
+        type=str, 
+        default=str(project_root / "KVzip" / "data" / "harry_potter4.txt"),
+        help="Path to a sample context file if showing KVzip stats from a cold start."
+    )
+    parser.add_argument(
+        "--kvzip-ratio-for-stats", 
+        type=float, 
+        default=0.3, 
+        help="Target compression ratio for KVzip stats demo (0.0 to 1.0)."
+    )
+    parser.add_argument(
+        "--kvzip-level-for-stats", 
+        type=str, 
+        default="pair", 
+        choices=['pair', 'head', 'pair-uniform'], 
+        help="KVzip compression level for stats demo."
+    )
+
+    args = parser.parse_args()
+
+    if args.kvzip_enabled is None: # If not specified, enable if KVZIP_MODEL is set
+        args.kvzip_enabled = bool(os.getenv("KVZIP_MODEL"))
+
+
+    if args.show_context_stats:
+        sample_text = None
+        if args.kvzip_enabled and args.sample_context_file and not _active_kvzip_cache:
+            # Only load sample if KVzip is enabled and no active cache exists
+            try:
+                with open(args.sample_context_file, 'r', encoding='utf-8') as f:
+                    sample_text = f.read()
+                print(f"[Info] Loaded sample context from: {args.sample_context_file}")
+            except FileNotFoundError:
+                print(f"[Warning] Sample context file not found: {args.sample_context_file}. KVzip details might be limited.")
+            except Exception as e:
+                print(f"[Warning] Error reading sample context file: {e}. KVzip details might be limited.")
+
+        display_context_stats(
+            kvzip_enabled_by_app=args.kvzip_enabled,
+            sample_context_for_kvzip=sample_text,
+            kvzip_compression_ratio_target_for_stats=args.kvzip_ratio_for_stats,
+            kvzip_compression_level_for_stats=args.kvzip_level_for_stats
+        )
+    else:
+        print("Run with --show-context-stats to see context statistics.")
+        # Here, your poc_KVzip.py would continue with its main functionality,
+        # potentially populating _active_kvzip_cache and _active_kvzip_compression_details
+        # which could then be read by display_context_stats if called later
+        # in an interactive mode or at the end of operations.
+        # For example:
+        # if __name__ == "__main__":
+        #    # ... main poc_KVzip.py logic that sets up model and kv_cache ...
+        #    _active_kvzip_model_instance = model 
+        #    _active_kvzip_cache = kv 
+        #    _active_kvzip_compression_details = {"ratio_achieved": real_ratio_from_prune, ...}
+        #    
+        #    # Then, if a stats display is triggered:
+        #    # display_context_stats(kvzip_enabled_by_app=True) # No sample_context needed
+        pass
+
+'''
+Explanation of the Output:
+
+LLM Model (via LITELLM_MODEL): The language model identifier fetched based on the LITELLM_MODEL environment variable (or its override).
+LLM Max Context Window: The maximum number of tokens this LLM can handle, fetched from your config_utils.py. "(default)" indicates if this value is a general default rather than specific to the model.
+KVzip Status: Indicates if KVzip is considered active. This depends on whether KVZIP_MODEL is set and the KVzip library is usable.
+KVzip Model (via KVZIP_MODEL): The model KVzip is configured to use, from the KVZIP_MODEL environment variable.
+KVzip-Managed Context Segment (tokens): This refers to kv_cache.ctx_len. It's the length (in tokens) of the primary context segment that KVzip's scoring and compression mechanisms are applied to. This is typically set by the evict_range during KV cache initialization.
+Total Prefilled Tokens (KVzip cache): This is kv_cache._seen_tokens, representing the total number of tokens processed and stored in the KV cache during the prefill phase. This includes any "sink" tokens and the main context.
+Current KV Cache Size: The memory footprint of the KV cache (keys and values) in Gigabytes, obtained via kv_cache._mem(). This size reflects the state after any compression/pruning.
+Compression Details: If pruning has occurred, this shows the target ratio, the actual achieved ratio, and the compression level (e.g., 'pair', 'head').
+Uncompressed Full Context Size: This is a placeholder. In a complete system, this would represent the total size (e.g., in tokens or MB) of all source files or inputs that constitute the full, uncompressed context before it's fed to the LLM or KVzip.
+To make this fully functional within your poc_KVzip.py:
+
+Ensure poc_KVzip.py can import config_utils. You might need to adjust sys.path or ensure your PYTHONPATH includes the src directory of your AI-Engineer project.
+The _active_kvzip_cache and _active_kvzip_compression_details variables would ideally be updated by the main part of poc_KVzip.py after it performs prefill and pruning. The display_context_stats function would then read this state.
+The _ensure_kvzip_initialized_for_stats function is a helper for standalone stats display; if poc_KVzip.py already manages an active cache, this helper might only be used if no such cache is found.
+This setup provides a command to inspect the various context sizes relevant to your AI Engineer and KVzip integration.
+'''
